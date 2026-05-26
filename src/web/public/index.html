@@ -123,33 +123,27 @@
            class="card mb-8 border-amber-200 bg-amber-50">
         <div class="flex items-start gap-5">
 
-          <!-- QR image (only when status === 'qr') -->
-          <template x-if="waStatus.status === 'qr' && waStatus.qrDataUrl">
-            <div class="flex-shrink-0">
-              <img :src="waStatus.qrDataUrl" alt="WhatsApp QR code"
-                   class="w-44 h-44 rounded-xl border border-amber-200 shadow-sm">
-            </div>
-          </template>
+          <!-- Left panel: QR image or state icon — all x-show so img src updates reactively -->
+          <div class="flex-shrink-0 w-44 h-44 rounded-xl border border-amber-200 bg-white flex items-center justify-center overflow-hidden">
 
-          <!-- Spinner / icon for non-QR states -->
-          <template x-if="waStatus.status !== 'qr' || !waStatus.qrDataUrl">
-            <div class="flex-shrink-0 w-44 h-44 rounded-xl border border-amber-200 bg-white flex items-center justify-center">
-              <template x-if="waStatus.status === 'initializing' || waStatus.status === 'authenticated'">
-                <svg class="w-10 h-10 text-amber-400 animate-spin" fill="none" viewBox="0 0 24 24">
-                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path>
-                </svg>
-              </template>
-              <template x-if="waStatus.status === 'disconnected'">
-                <span class="text-5xl">⚠️</span>
-              </template>
-              <template x-if="waStatus.status === 'not-running'">
-                <span class="text-5xl">💤</span>
-              </template>
-            </div>
-          </template>
+            <!-- QR image — always in DOM so :src binding updates the moment qrDataUrl changes -->
+            <img x-show="!!waStatus.qrDataUrl"
+                 :src="waStatus.qrDataUrl || ''"
+                 alt="WhatsApp QR code"
+                 class="w-full h-full rounded-xl">
 
-          <!-- Text description -->
+            <!-- Spinner (initialising / authenticated) -->
+            <svg x-show="!waStatus.qrDataUrl && (waStatus.status === 'initializing' || waStatus.status === 'authenticated')"
+                 class="w-10 h-10 text-amber-400 animate-spin" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path>
+            </svg>
+
+            <span x-show="!waStatus.qrDataUrl && waStatus.status === 'disconnected'" class="text-5xl">⚠️</span>
+            <span x-show="!waStatus.qrDataUrl && waStatus.status === 'not-running'"  class="text-5xl">💤</span>
+          </div>
+
+          <!-- Right panel: text + action button — x-show so Alpine updates text in place -->
           <div class="flex-1 min-w-0 py-2">
             <h3 class="text-base font-bold text-slate-800 mb-1">
               📱 WhatsApp Bot
@@ -160,36 +154,29 @@
               }" x-text="waStatusLabel.text"></span>
             </h3>
 
-            <template x-if="waStatus.status === 'qr'">
-              <div>
-                <p class="text-slate-600 text-sm mb-2">Open WhatsApp on the barber's phone, go to <strong>Linked Devices → Link a Device</strong>, and scan the QR code.</p>
-                <p class="text-xs text-slate-400 mb-4">The code refreshes every ~60 seconds — this panel updates automatically.</p>
-                <button @click="reconnectBot()" class="btn-secondary text-xs">🔄 Refresh QR</button>
-              </div>
-            </template>
+            <div x-show="waStatus.status === 'qr'">
+              <p class="text-slate-600 text-sm mb-2">Open WhatsApp on the barber's phone, go to <strong>Linked Devices → Link a Device</strong>, and scan the QR code.</p>
+              <p class="text-xs text-slate-400 mb-4">The code refreshes every ~60 seconds — this panel updates automatically.</p>
+              <button @click="reconnectBot()" class="btn-secondary text-xs">🔄 Refresh QR</button>
+            </div>
 
-            <template x-if="waStatus.status === 'initializing' || waStatus.status === 'authenticated'">
-              <div>
-                <p class="text-slate-600 text-sm mb-4">Connecting to WhatsApp — please wait…</p>
-                <button @click="loadWhatsappStatus()" class="btn-secondary text-xs">↺ Check status</button>
-              </div>
-            </template>
+            <div x-show="waStatus.status === 'initializing' || waStatus.status === 'authenticated'">
+              <p class="text-slate-600 text-sm mb-4">Connecting to WhatsApp — please wait…</p>
+              <button @click="loadWhatsappStatus()" class="btn-secondary text-xs">↺ Check status</button>
+            </div>
 
-            <template x-if="waStatus.status === 'disconnected'">
-              <div>
-                <p class="text-slate-600 text-sm mb-2">The WhatsApp connection was lost.</p>
-                <p class="text-xs text-slate-400 mb-4">If reconnecting repeatedly fails, delete <code class="bg-slate-100 px-1 rounded">.wwebjs_auth/</code> and reconnect to re-scan.</p>
-                <button @click="reconnectBot()" class="btn-primary text-xs">🔄 Reconnect Bot</button>
-              </div>
-            </template>
+            <div x-show="waStatus.status === 'disconnected'">
+              <p class="text-slate-600 text-sm mb-2">The WhatsApp connection was lost.</p>
+              <p class="text-xs text-slate-400 mb-4">If reconnecting repeatedly fails, delete <code class="bg-slate-100 px-1 rounded">.wwebjs_auth/</code> and reconnect to re-scan.</p>
+              <button @click="reconnectBot()" class="btn-primary text-xs">🔄 Reconnect Bot</button>
+            </div>
 
-            <template x-if="waStatus.status === 'not-running'">
-              <div>
-                <p class="text-slate-600 text-sm mb-4">The WhatsApp bot is not connected. Click the button below to start it — a QR code will appear for scanning.</p>
-                <button @click="startBot()" class="btn-primary text-xs">▶️ Start Bot</button>
-              </div>
-            </template>
+            <div x-show="waStatus.status === 'not-running'">
+              <p class="text-slate-600 text-sm mb-4">The WhatsApp bot is not connected. Click the button below to start it — a QR code will appear for scanning.</p>
+              <button @click="startBot()" class="btn-primary text-xs">▶️ Start Bot</button>
+            </div>
           </div>
+
         </div>
       </div>
 
@@ -653,7 +640,7 @@ function app() {
 
     async loadWhatsappStatus() {
       try {
-        const r = await fetch('/api/whatsapp/status');
+        const r = await fetch('/api/whatsapp/status', { cache: 'no-store' });
         if (r.ok) this.waStatus = await r.json();
       } catch (_) {}
     },

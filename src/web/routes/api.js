@@ -42,9 +42,10 @@ router.get('/auth/status', (req, res) => {
 // The QR image itself is safe to expose publicly — it's a one-time-use code
 // and expires in ~60 seconds anyway.
 router.get('/whatsapp/status', (req, res) => {
+  res.set('Cache-Control', 'no-store');
   res.json({
-    status:    waState.status,
-    qrDataUrl: waState.status === 'qr' ? waState.qrDataUrl : null,
+    status:      waState.status,
+    qrDataUrl:   waState.status === 'qr' ? waState.qrDataUrl : null,
     lastUpdated: waState.lastUpdated,
   });
 });
