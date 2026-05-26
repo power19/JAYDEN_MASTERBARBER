@@ -123,14 +123,18 @@
            class="card mb-8 border-amber-200 bg-amber-50">
         <div class="flex items-start gap-5">
 
-          <!-- Left panel: QR image or state icon — all x-show so img src updates reactively -->
-          <div class="flex-shrink-0 w-44 h-44 rounded-xl border border-amber-200 bg-white flex items-center justify-center overflow-hidden">
+          <!-- Left panel: QR image or state icon -->
+          <div class="flex-shrink-0 rounded-xl border border-amber-200 bg-white overflow-hidden" style="width:176px;min-height:176px;display:flex;align-items:center;justify-content:center;">
 
-            <!-- QR image — always in DOM so :src binding updates the moment qrDataUrl changes -->
-            <img x-show="!!waStatus.qrDataUrl"
-                 :src="waStatus.qrDataUrl || ''"
-                 alt="WhatsApp QR code"
-                 class="w-full h-full rounded-xl">
+            <!-- QR image — x-for with qrNonce as key forces a full DOM remount each time a
+                 new QR arrives, guaranteeing the browser decodes and displays the fresh image -->
+            <template x-if="!!waStatus.qrDataUrl">
+              <template x-for="n in [qrNonce]" :key="n">
+                <img :src="waStatus.qrDataUrl"
+                     alt="WhatsApp QR code"
+                     style="width:176px;height:176px;display:block;">
+              </template>
+            </template>
 
             <!-- Spinner (initialising / authenticated) -->
             <svg x-show="!waStatus.qrDataUrl && (waStatus.status === 'initializing' || waStatus.status === 'authenticated')"
@@ -156,8 +160,9 @@
 
             <div x-show="waStatus.status === 'qr'">
               <p class="text-slate-600 text-sm mb-2">Open WhatsApp on the barber's phone, go to <strong>Linked Devices → Link a Device</strong>, and scan the QR code.</p>
-              <p class="text-xs text-slate-400 mb-4">The code refreshes every ~60 seconds — this panel updates automatically.</p>
-              <button @click="reconnectBot()" class="btn-secondary text-xs">🔄 Refresh QR</button>
+              <p class="text-xs text-slate-400 mb-1">Refreshes automatically every ~20 seconds.</p>
+              <p class="text-xs text-slate-300 mb-4" x-text="waStatus.lastUpdated ? 'Last updated: ' + new Date(waStatus.lastUpdated).toLocaleTimeString() : ''"></p>
+              <button @click="reconnectBot()" class="btn-secondary text-xs">🔄 Force Refresh</button>
             </div>
 
             <div x-show="waStatus.status === 'initializing' || waStatus.status === 'authenticated'">
@@ -610,6 +615,7 @@ function app() {
 
     // WhatsApp connection state
     waStatus: { status: 'loading', qrDataUrl: null, lastUpdated: null },
+    qrNonce: 0,   // incremented each time a NEW QR arrives; used as x-for key to force img remount
 
     // UI state
     botPaused: false,
@@ -641,7 +647,13 @@ function app() {
     async loadWhatsappStatus() {
       try {
         const r = await fetch('/api/whatsapp/status', { cache: 'no-store' });
-        if (r.ok) this.waStatus = await r.json();
+        if (!r.ok) return;
+        const data = await r.json();
+        // New QR arrived when lastUpdated changed while status is 'qr'
+        if (data.status === 'qr' && data.lastUpdated !== this.waStatus.lastUpdated) {
+          this.qrNonce++;   // triggers x-for key change → img element is fully remounted
+        }
+        this.waStatus = data;
       } catch (_) {}
     },
 
