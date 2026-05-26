@@ -17,6 +17,9 @@ logs/
 *.log
 npm-debug.log*
 
+# Database (live data — never commit)
+data/*.json
+
 # OS files
 .DS_Store
 Thumbs.db

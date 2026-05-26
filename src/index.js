@@ -1,67 +1,62 @@
 /**
- * Jayden's Barbershop — WhatsApp Booking Bot
- * Entry point: starts the WhatsApp client and wires up all event handlers.
- *
- * First run: a QR code will appear in the terminal.
- * Scan it with the barber's WhatsApp → session saved to .wwebjs_auth/
- * Subsequent runs connect automatically.
+ * Jayden's Barbershop — Entry Point
+ * Starts both the WhatsApp bot and the admin web dashboard.
  */
 
 require('dotenv').config();
 
-const qrcode = require('qrcode-terminal');
-const { createBot } = require('./bot');
-const { handleMessage } = require('./handlers/conversationHandler');
-const shop = require('./config/shopInfo');
+const qrcode           = require('qrcode-terminal');
+const { createBot }    = require('./bot');
+const { handleMessage }= require('./handlers/conversationHandler');
+const { createServer } = require('./web/server');
+const q                = require('./db/queries');
 
-// ── Startup ───────────────────────────────────────────────────────────────────
+const shopName = q.getSetting('shop_name') || "Jayden's Barbershop";
 
 console.log('');
-console.log('╔══════════════════════════════════════╗');
-console.log(`║  💈  ${shop.name.padEnd(32)}║`);
-console.log('║      WhatsApp Booking Bot            ║');
-console.log('╚══════════════════════════════════════╝');
+console.log('╔══════════════════════════════════════════╗');
+console.log(`║  💈  ${shopName.substring(0, 34).padEnd(34)}  ║`);
+console.log('║      WhatsApp Bot + Admin Dashboard      ║');
+console.log('╚══════════════════════════════════════════╝');
 console.log('');
 
+// ── Start the admin web server ────────────────────────────────────────────────
+createServer().catch(err => {
+  console.error('❌ Failed to start web server:', err.message);
+});
+
+// ── Start the WhatsApp bot ────────────────────────────────────────────────────
 const client = createBot();
 
-// ── WhatsApp events ───────────────────────────────────────────────────────────
-
 client.on('qr', (qr) => {
-  console.log('📱 Scan this QR code with WhatsApp on the barber\'s phone:\n');
+  console.log('📱 Scan this QR code with the barber\'s WhatsApp:\n');
   qrcode.generate(qr, { small: true });
-  console.log('\n⏳ Waiting for scan...\n');
+  console.log('\n⏳ Waiting for scan…\n');
 });
 
 client.on('authenticated', () => {
-  console.log('🔐 Authenticated — session saved locally.');
+  console.log('🔐 WhatsApp authenticated — session saved.');
 });
 
 client.on('auth_failure', (msg) => {
-  console.error('❌ Authentication failed:', msg);
-  console.error('Delete the .wwebjs_auth/ folder and restart to re-scan the QR.');
+  console.error('❌ WhatsApp auth failed:', msg);
+  console.error('   → Delete .wwebjs_auth/ and restart to re-scan the QR.');
   process.exit(1);
 });
 
 client.on('ready', () => {
-  console.log(`\n✅ Bot is LIVE — listening for messages on WhatsApp.\n`);
-  console.log('   Timezone :', process.env.TIMEZONE || 'America/Paramaribo');
-  console.log('   Calendar :', process.env.GOOGLE_CALENDAR_ID || 'primary');
+  const employees = q.getActiveEmployees();
+  console.log(`\n✅ WhatsApp bot is LIVE`);
+  console.log(`   Active barbers : ${employees.length} (${employees.map(e => e.name).join(', ') || 'none — add via dashboard'})`);
+  console.log(`   Bot paused     : ${q.getSetting('bot_paused') === '1' ? 'YES ⚠️' : 'no'}`);
   console.log('');
 });
 
-// ── Message handling ──────────────────────────────────────────────────────────
-
 client.on('message', async (msg) => {
-  // Ignore group chats and broadcast status
   if (msg.from.endsWith('@g.us') || msg.from === 'status@broadcast') return;
 
-  // Ignore messages without text (images, voice notes, etc.)
-  if (!msg.body || !msg.body.trim()) {
-    await msg.reply(
-      '📝 Please send a *text message* to interact with the bot.\n\n' +
-      'Type *menu* to get started! 💈'
-    );
+  if (!msg.body?.trim()) {
+    await msg.reply('📝 Please send a *text message* to interact with the bot.\n\nType *menu* to get started! 💈');
     return;
   }
 
@@ -69,31 +64,22 @@ client.on('message', async (msg) => {
 
   try {
     const reply = await handleMessage(msg);
-    if (reply) {
-      await msg.reply(reply);
-    }
+    if (reply) await msg.reply(reply);
   } catch (err) {
-    console.error('❌ Unhandled error:', err);
-    await msg.reply(
-      '😔 Something went wrong on our end. Please try again or contact us at ' +
-      shop.phone
-    );
+    console.error('❌ Error handling message:', err);
+    await msg.reply(`😔 Something went wrong. Please contact us at ${q.getSetting('shop_phone') || 'the shop'}.`);
   }
 });
 
-// ── Shutdown handling ─────────────────────────────────────────────────────────
-
 client.on('disconnected', (reason) => {
-  console.log('⚠️  Disconnected:', reason);
+  console.log('⚠️  WhatsApp disconnected:', reason);
   process.exit(0);
 });
 
 process.on('SIGINT', async () => {
-  console.log('\n👋 Shutting down bot gracefully...');
-  await client.destroy();
+  console.log('\n👋 Shutting down…');
+  await client.destroy().catch(() => {});
   process.exit(0);
 });
-
-// ── Start ─────────────────────────────────────────────────────────────────────
 
 client.initialize();

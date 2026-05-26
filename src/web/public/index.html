@@ -1,0 +1,734 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Barbershop Admin</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <style>
+    [x-cloak] { display: none !important; }
+    .sidebar-link { @apply flex items-center gap-3 px-4 py-2.5 rounded-lg text-slate-300 hover:bg-white/10 hover:text-white transition-all text-sm font-medium; }
+    .sidebar-link.active { @apply bg-amber-500/20 text-amber-400; }
+    .badge { @apply inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium; }
+    .badge-green  { @apply bg-emerald-100 text-emerald-700; }
+    .badge-red    { @apply bg-red-100 text-red-700; }
+    .badge-gray   { @apply bg-slate-100 text-slate-600; }
+    .badge-orange { @apply bg-orange-100 text-orange-700; }
+    .badge-blue   { @apply bg-blue-100 text-blue-700; }
+    .card { @apply bg-white rounded-2xl shadow-sm border border-slate-100 p-6; }
+    .btn-primary { @apply bg-amber-500 hover:bg-amber-400 text-white font-semibold px-4 py-2 rounded-xl transition text-sm; }
+    .btn-secondary { @apply bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold px-4 py-2 rounded-xl transition text-sm; }
+    .btn-danger { @apply bg-red-500 hover:bg-red-400 text-white font-semibold px-4 py-2 rounded-xl transition text-sm; }
+    .input { @apply w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400; }
+    .label { @apply block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1; }
+    .modal-overlay { @apply fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4; }
+    .modal { @apply bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6; }
+  </style>
+</head>
+<body class="bg-slate-100 font-sans" x-data="app()" x-cloak>
+
+<!-- ── Login Screen ───────────────────────────────────────────────────────── -->
+<div x-show="!authenticated" class="min-h-screen flex items-center justify-center">
+  <div class="bg-white rounded-2xl shadow-xl p-10 w-full max-w-sm">
+    <div class="text-center mb-8">
+      <div class="text-5xl mb-3">💈</div>
+      <h1 class="text-2xl font-bold text-slate-800" x-text="shopName || 'Barbershop Admin'"></h1>
+      <p class="text-slate-500 text-sm mt-1">Admin Dashboard</p>
+    </div>
+    <form @submit.prevent="login">
+      <label class="label">Password</label>
+      <input type="password" x-model="loginPassword" class="input mb-4" placeholder="Enter admin password" required>
+      <p x-show="loginError" class="text-red-500 text-sm mb-3" x-text="loginError"></p>
+      <button type="submit" class="btn-primary w-full py-2.5">Sign In</button>
+    </form>
+  </div>
+</div>
+
+<!-- ── Main App ───────────────────────────────────────────────────────────── -->
+<div x-show="authenticated" class="flex h-screen overflow-hidden">
+
+  <!-- Sidebar -->
+  <aside class="w-64 bg-slate-900 flex flex-col flex-shrink-0 overflow-y-auto">
+    <div class="p-5 border-b border-white/10">
+      <div class="flex items-center gap-3">
+        <span class="text-3xl">💈</span>
+        <div>
+          <div class="text-white font-bold text-sm leading-tight" x-text="shopName || 'Barbershop'"></div>
+          <div class="text-slate-400 text-xs">Admin Dashboard</div>
+        </div>
+      </div>
+    </div>
+
+    <nav class="flex-1 p-3 space-y-1">
+      <button @click="nav('dashboard')"   :class="page==='dashboard'   ? 'active' : ''" class="sidebar-link w-full text-left">📊 Dashboard</button>
+      <button @click="nav('appointments')" :class="page==='appointments' ? 'active' : ''" class="sidebar-link w-full text-left">📅 Appointments</button>
+      <button @click="nav('employees')"   :class="page==='employees'   ? 'active' : ''" class="sidebar-link w-full text-left">👥 Employees</button>
+      <button @click="nav('hours')"       :class="page==='hours'       ? 'active' : ''" class="sidebar-link w-full text-left">⏰ Work Hours</button>
+      <button @click="nav('services')"    :class="page==='services'    ? 'active' : ''" class="sidebar-link w-full text-left">✂️ Services</button>
+      <button @click="nav('messages')"    :class="page==='messages'    ? 'active' : ''" class="sidebar-link w-full text-left">✉️ Bot Messages</button>
+      <button @click="nav('settings')"    :class="page==='settings'    ? 'active' : ''" class="sidebar-link w-full text-left">⚙️ Settings</button>
+    </nav>
+
+    <div class="p-4 border-t border-white/10">
+      <!-- Bot pause toggle -->
+      <div class="flex items-center justify-between mb-3">
+        <span class="text-slate-300 text-xs font-medium">Bot Active</span>
+        <button @click="toggleBotPause()"
+          :class="botPaused ? 'bg-slate-600' : 'bg-amber-500'"
+          class="relative inline-flex h-6 w-11 rounded-full transition-colors">
+          <span :class="botPaused ? 'translate-x-1' : 'translate-x-6'"
+            class="inline-block h-4 w-4 rounded-full bg-white shadow mt-1 transition-transform"></span>
+        </button>
+      </div>
+      <button @click="logout()" class="sidebar-link w-full text-left text-slate-400 hover:text-red-400">🚪 Sign Out</button>
+    </div>
+  </aside>
+
+  <!-- Main content -->
+  <main class="flex-1 overflow-y-auto">
+
+    <!-- ── DASHBOARD ─────────────────────────────────────────────── -->
+    <div x-show="page === 'dashboard'" class="p-8">
+      <h2 class="text-2xl font-bold text-slate-800 mb-6">Dashboard</h2>
+
+      <!-- Stats -->
+      <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+        <div class="card text-center">
+          <div class="text-3xl font-bold text-amber-500" x-text="stats.today ?? '—'"></div>
+          <div class="text-slate-500 text-sm mt-1">Today's Bookings</div>
+        </div>
+        <div class="card text-center">
+          <div class="text-3xl font-bold text-blue-500" x-text="stats.week ?? '—'"></div>
+          <div class="text-slate-500 text-sm mt-1">This Week</div>
+        </div>
+        <div class="card text-center">
+          <div class="text-3xl font-bold text-emerald-500" x-text="settings.currency + ' ' + (stats.revenue?.toFixed(2) ?? '0')"></div>
+          <div class="text-slate-500 text-sm mt-1">Today's Revenue</div>
+        </div>
+        <div class="card text-center">
+          <div class="text-3xl font-bold text-purple-500" x-text="stats.upcoming ?? '—'"></div>
+          <div class="text-slate-500 text-sm mt-1">Upcoming</div>
+        </div>
+      </div>
+
+      <!-- Today's schedule -->
+      <div class="card">
+        <h3 class="text-lg font-bold text-slate-800 mb-4">📅 Today's Schedule</h3>
+        <div x-show="todayAppointments.length === 0" class="text-slate-400 text-center py-8">No appointments today</div>
+        <div class="space-y-3">
+          <template x-for="a in todayAppointments" :key="a.id">
+            <div class="flex items-center gap-4 p-3 rounded-xl hover:bg-slate-50 border border-slate-100">
+              <div class="text-sm font-mono font-bold text-slate-600 w-20 flex-shrink-0" x-text="fmtTime(a.start_time)"></div>
+              <div class="w-3 h-3 rounded-full flex-shrink-0" :style="`background:${a.employee_color||'#94a3b8'}`"></div>
+              <div class="flex-1 min-w-0">
+                <div class="font-semibold text-slate-800 text-sm" x-text="a.customer_name"></div>
+                <div class="text-slate-500 text-xs" x-text="`${a.service_emoji} ${a.service_name} · ${a.employee_name || 'Unassigned'}`"></div>
+              </div>
+              <div>
+                <span class="badge" :class="statusBadge(a.status)" x-text="a.status"></span>
+              </div>
+              <div class="flex gap-2">
+                <button @click="markStatus(a.id, 'completed')" title="Mark completed" class="text-emerald-500 hover:text-emerald-600 text-lg">✅</button>
+                <button @click="markStatus(a.id, 'no-show')"   title="Mark no-show"   class="text-orange-400 hover:text-orange-500 text-lg">👻</button>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── APPOINTMENTS ──────────────────────────────────────────── -->
+    <div x-show="page === 'appointments'" class="p-8">
+      <h2 class="text-2xl font-bold text-slate-800 mb-6">Appointments</h2>
+
+      <!-- Filters -->
+      <div class="card mb-6">
+        <div class="flex flex-wrap gap-4">
+          <div>
+            <label class="label">Date</label>
+            <input type="date" x-model="apptFilter.date" @change="loadAppointments()" class="input w-44">
+          </div>
+          <div>
+            <label class="label">Barber</label>
+            <select x-model="apptFilter.employee_id" @change="loadAppointments()" class="input w-44">
+              <option value="">All Barbers</option>
+              <template x-for="e in employees" :key="e.id">
+                <option :value="e.id" x-text="e.name"></option>
+              </template>
+            </select>
+          </div>
+          <div>
+            <label class="label">Status</label>
+            <select x-model="apptFilter.status" @change="loadAppointments()" class="input w-44">
+              <option value="">All Statuses</option>
+              <option value="confirmed">Confirmed</option>
+              <option value="completed">Completed</option>
+              <option value="cancelled">Cancelled</option>
+              <option value="no-show">No-Show</option>
+            </select>
+          </div>
+          <div class="flex items-end">
+            <button @click="apptFilter={date:'',employee_id:'',status:''}; loadAppointments()" class="btn-secondary">Clear</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div x-show="appointments.length === 0" class="text-slate-400 text-center py-8">No appointments found</div>
+        <div class="overflow-x-auto">
+          <table x-show="appointments.length > 0" class="w-full text-sm">
+            <thead>
+              <tr class="text-left border-b border-slate-100">
+                <th class="pb-3 text-slate-500 font-medium">Date & Time</th>
+                <th class="pb-3 text-slate-500 font-medium">Customer</th>
+                <th class="pb-3 text-slate-500 font-medium">Service</th>
+                <th class="pb-3 text-slate-500 font-medium">Barber</th>
+                <th class="pb-3 text-slate-500 font-medium">Price</th>
+                <th class="pb-3 text-slate-500 font-medium">Status</th>
+                <th class="pb-3 text-slate-500 font-medium">Actions</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-50">
+              <template x-for="a in appointments" :key="a.id">
+                <tr class="hover:bg-slate-50">
+                  <td class="py-3 font-mono text-xs" x-text="fmtDateTime(a.start_time)"></td>
+                  <td class="py-3">
+                    <div class="font-medium text-slate-800" x-text="a.customer_name"></div>
+                    <div class="text-slate-400 text-xs" x-text="'+' + a.customer_phone"></div>
+                  </td>
+                  <td class="py-3" x-text="`${a.service_emoji} ${a.service_name}`"></td>
+                  <td class="py-3">
+                    <div class="flex items-center gap-2">
+                      <div class="w-2.5 h-2.5 rounded-full" :style="`background:${a.employee_color||'#94a3b8'}`"></div>
+                      <span x-text="a.employee_name || '—'"></span>
+                    </div>
+                  </td>
+                  <td class="py-3" x-text="`${settings.currency} ${a.service_price}`"></td>
+                  <td class="py-3"><span class="badge" :class="statusBadge(a.status)" x-text="a.status"></span></td>
+                  <td class="py-3">
+                    <select @change="markStatus(a.id, $event.target.value); $event.target.value=''" class="input py-1 text-xs w-32">
+                      <option value="">Change status…</option>
+                      <option value="confirmed">Confirmed</option>
+                      <option value="completed">Completed</option>
+                      <option value="no-show">No-Show</option>
+                      <option value="cancelled">Cancelled</option>
+                    </select>
+                  </td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── EMPLOYEES ─────────────────────────────────────────────── -->
+    <div x-show="page === 'employees'" class="p-8">
+      <div class="flex justify-between items-center mb-6">
+        <h2 class="text-2xl font-bold text-slate-800">Employees</h2>
+        <button @click="openEmployeeModal()" class="btn-primary">+ Add Barber</button>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <template x-for="e in employees" :key="e.id">
+          <div class="card">
+            <div class="flex items-start justify-between mb-4">
+              <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-lg"
+                     :style="`background:${e.color}`" x-text="e.name[0].toUpperCase()"></div>
+                <div>
+                  <div class="font-bold text-slate-800" x-text="e.name"></div>
+                  <span class="badge" :class="e.is_active ? 'badge-green' : 'badge-gray'"
+                        x-text="e.is_active ? 'Active' : 'Inactive'"></span>
+                </div>
+              </div>
+            </div>
+            <div class="text-sm text-slate-500 space-y-1 mb-4">
+              <div x-show="e.phone" x-text="`📱 ${e.phone}`"></div>
+              <div x-show="e.google_calendar_id" class="truncate text-xs" x-text="`📅 ${e.google_calendar_id}`"></div>
+            </div>
+            <div class="flex gap-2">
+              <button @click="openEmployeeModal(e)" class="btn-secondary flex-1 text-xs">✏️ Edit</button>
+              <button @click="nav('hours'); selectedHoursEmployee = e.id; loadHours()"
+                      class="btn-secondary flex-1 text-xs">⏰ Hours</button>
+              <button @click="toggleEmployee(e.id)"
+                      :class="e.is_active ? 'btn-danger' : 'btn-primary'"
+                      class="flex-1 text-xs px-2 py-2 rounded-xl font-semibold transition text-sm"
+                      x-text="e.is_active ? 'Deactivate' : 'Activate'"></button>
+            </div>
+          </div>
+        </template>
+        <div x-show="employees.length === 0" class="col-span-3 card text-center text-slate-400 py-12">
+          No employees yet. Click "Add Barber" to get started.
+        </div>
+      </div>
+    </div>
+
+    <!-- ── WORK HOURS ─────────────────────────────────────────────── -->
+    <div x-show="page === 'hours'" class="p-8">
+      <h2 class="text-2xl font-bold text-slate-800 mb-6">Work Hours</h2>
+
+      <!-- Employee tabs -->
+      <div class="flex gap-2 mb-6 flex-wrap">
+        <button @click="selectedHoursEmployee = null; loadHours()"
+          :class="selectedHoursEmployee === null ? 'btn-primary' : 'btn-secondary'" class="text-xs">
+          🌐 Global Default
+        </button>
+        <template x-for="e in employees.filter(e=>e.is_active)" :key="e.id">
+          <button @click="selectedHoursEmployee = e.id; loadHours()"
+            :class="selectedHoursEmployee == e.id ? 'btn-primary' : 'btn-secondary'" class="text-xs"
+            x-text="e.name"></button>
+        </template>
+      </div>
+
+      <div class="card">
+        <p class="text-slate-500 text-sm mb-6" x-show="selectedHoursEmployee === null">
+          Global hours are used as the default for all barbers. Override per barber using the tabs above.
+        </p>
+        <div class="space-y-3">
+          <template x-for="(h, idx) in weeklyHours" :key="h.day_of_week">
+            <div class="flex items-center gap-4 p-3 rounded-xl hover:bg-slate-50">
+              <div class="w-28 text-sm font-medium text-slate-700"
+                   x-text="['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][h.day_of_week]"></div>
+              <!-- Toggle -->
+              <button @click="h.is_open = h.is_open ? 0 : 1"
+                :class="h.is_open ? 'bg-amber-500' : 'bg-slate-300'"
+                class="relative inline-flex h-6 w-11 rounded-full transition-colors flex-shrink-0">
+                <span :class="h.is_open ? 'translate-x-6' : 'translate-x-1'"
+                  class="inline-block h-4 w-4 rounded-full bg-white shadow mt-1 transition-transform"></span>
+              </button>
+              <span class="text-xs text-slate-500 w-12" x-text="h.is_open ? 'Open' : 'Closed'"></span>
+              <template x-if="h.is_open">
+                <div class="flex items-center gap-2">
+                  <input type="time" x-model="h.open_time"  class="input w-32 text-sm">
+                  <span class="text-slate-400">–</span>
+                  <input type="time" x-model="h.close_time" class="input w-32 text-sm">
+                </div>
+              </template>
+            </div>
+          </template>
+        </div>
+        <div class="mt-6 flex gap-3">
+          <button @click="saveHours()" class="btn-primary">💾 Save Hours</button>
+          <span x-show="hoursSaved" class="text-emerald-500 text-sm self-center">✅ Saved!</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── SERVICES ──────────────────────────────────────────────── -->
+    <div x-show="page === 'services'" class="p-8">
+      <div class="flex justify-between items-center mb-6">
+        <h2 class="text-2xl font-bold text-slate-800">Services</h2>
+        <button @click="openServiceModal()" class="btn-primary">+ Add Service</button>
+      </div>
+      <div class="card">
+        <div x-show="services.length === 0" class="text-center text-slate-400 py-8">No services yet</div>
+        <div class="space-y-3">
+          <template x-for="s in services" :key="s.id">
+            <div class="flex items-center gap-4 p-3 rounded-xl hover:bg-slate-50 border border-slate-100">
+              <span class="text-2xl" x-text="s.emoji || '✂️'"></span>
+              <div class="flex-1">
+                <div class="flex items-center gap-2">
+                  <span class="font-semibold text-slate-800" x-text="s.name"></span>
+                  <span class="badge" :class="s.is_active ? 'badge-green' : 'badge-gray'"
+                        x-text="s.is_active ? 'Active' : 'Hidden'"></span>
+                </div>
+                <div class="text-slate-500 text-xs" x-text="s.description"></div>
+              </div>
+              <div class="text-right flex-shrink-0">
+                <div class="font-bold text-slate-800" x-text="`${settings.currency} ${s.price}`"></div>
+                <div class="text-slate-400 text-xs" x-text="`${s.duration} min`"></div>
+              </div>
+              <div class="flex gap-2">
+                <button @click="openServiceModal(s)" class="btn-secondary text-xs">✏️</button>
+                <button @click="toggleService(s.id)" class="btn-secondary text-xs"
+                        x-text="s.is_active ? '🙈 Hide' : '👁 Show'"></button>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── BOT MESSAGES ──────────────────────────────────────────── -->
+    <div x-show="page === 'messages'" class="p-8">
+      <div class="flex justify-between items-center mb-6">
+        <h2 class="text-2xl font-bold text-slate-800">Bot Messages</h2>
+        <button @click="saveMessages()" class="btn-primary">💾 Save All</button>
+      </div>
+      <div class="space-y-4">
+        <template x-for="m in botMessages" :key="m.key">
+          <div class="card">
+            <label class="block font-semibold text-slate-700 mb-1" x-text="m.label"></label>
+            <p class="text-slate-400 text-xs mb-2" x-text="m.description"></p>
+            <textarea x-model="m.value" rows="3"
+              class="input font-mono text-sm" :placeholder="m.label"></textarea>
+          </div>
+        </template>
+        <div x-show="botMessages.length === 0" class="card text-center text-slate-400 py-8">Loading…</div>
+      </div>
+      <div class="mt-4 flex gap-3">
+        <button @click="saveMessages()" class="btn-primary">💾 Save All</button>
+        <span x-show="messagesSaved" class="text-emerald-500 text-sm self-center">✅ Saved!</span>
+      </div>
+    </div>
+
+    <!-- ── SETTINGS ──────────────────────────────────────────────── -->
+    <div x-show="page === 'settings'" class="p-8">
+      <div class="flex justify-between items-center mb-6">
+        <h2 class="text-2xl font-bold text-slate-800">Settings</h2>
+        <button @click="saveSettings()" class="btn-primary">💾 Save</button>
+      </div>
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div class="card">
+          <h3 class="font-bold text-slate-700 mb-4">🏪 Shop Info</h3>
+          <div class="space-y-4">
+            <div><label class="label">Shop Name</label><input x-model="settings.shop_name" class="input"></div>
+            <div><label class="label">Address</label><input x-model="settings.shop_address" class="input"></div>
+            <div><label class="label">Phone / WhatsApp</label><input x-model="settings.shop_phone" class="input"></div>
+            <div><label class="label">Email</label><input x-model="settings.shop_email" class="input"></div>
+            <div><label class="label">Instagram</label><input x-model="settings.shop_instagram" class="input"></div>
+            <div><label class="label">Google Maps Link</label><input x-model="settings.google_maps_link" class="input"></div>
+          </div>
+        </div>
+        <div class="card">
+          <h3 class="font-bold text-slate-700 mb-4">🌍 Regional</h3>
+          <div class="space-y-4">
+            <div><label class="label">Currency Symbol</label><input x-model="settings.currency" class="input" placeholder="SRD, $, £…"></div>
+            <div><label class="label">Timezone</label><input x-model="settings.timezone" class="input" placeholder="America/Paramaribo"></div>
+          </div>
+          <h3 class="font-bold text-slate-700 mb-4 mt-6">🤖 Bot</h3>
+          <div class="flex items-center gap-3">
+            <input type="checkbox" :checked="settings.allow_any_employee === '1'"
+              @change="settings.allow_any_employee = $event.target.checked ? '1' : '0'"
+              class="w-4 h-4 accent-amber-500">
+            <span class="text-sm text-slate-700">Show "Any Available Barber" option in booking</span>
+          </div>
+        </div>
+      </div>
+      <div class="mt-4 flex gap-3">
+        <button @click="saveSettings()" class="btn-primary">💾 Save Settings</button>
+        <span x-show="settingsSaved" class="text-emerald-500 text-sm self-center">✅ Saved!</span>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<!-- ── Employee Modal ──────────────────────────────────────────────────────── -->
+<div x-show="showEmployeeModal" class="modal-overlay" @click.self="showEmployeeModal=false">
+  <div class="modal">
+    <h3 class="text-lg font-bold text-slate-800 mb-5" x-text="editingEmployee ? 'Edit Barber' : 'Add Barber'"></h3>
+    <div class="space-y-4">
+      <div>
+        <label class="label">Full Name *</label>
+        <input x-model="employeeForm.name" class="input" placeholder="Jayden" required>
+      </div>
+      <div>
+        <label class="label">Phone Number</label>
+        <input x-model="employeeForm.phone" class="input" placeholder="+597 XXX-XXXX">
+      </div>
+      <div>
+        <label class="label">Color</label>
+        <div class="flex gap-2 flex-wrap mt-1">
+          <template x-for="c in ['#f59e0b','#10b981','#3b82f6','#8b5cf6','#ef4444','#ec4899','#64748b']" :key="c">
+            <button type="button" @click="employeeForm.color = c"
+              class="w-8 h-8 rounded-full border-2 transition"
+              :class="employeeForm.color === c ? 'border-slate-800 scale-110' : 'border-transparent'"
+              :style="`background:${c}`"></button>
+          </template>
+        </div>
+      </div>
+      <div>
+        <label class="label">Google Calendar ID <span class="normal-case font-normal">(optional)</span></label>
+        <input x-model="employeeForm.google_calendar_id" class="input font-mono text-xs"
+          placeholder="example@gmail.com or calendar ID">
+        <p class="text-xs text-slate-400 mt-1">Events for this barber will sync to this calendar.</p>
+      </div>
+    </div>
+    <div class="flex gap-3 mt-6">
+      <button @click="saveEmployee()" class="btn-primary flex-1">
+        <span x-text="editingEmployee ? 'Save Changes' : 'Add Barber'"></span>
+      </button>
+      <button @click="showEmployeeModal=false" class="btn-secondary flex-1">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Service Modal ───────────────────────────────────────────────────────── -->
+<div x-show="showServiceModal" class="modal-overlay" @click.self="showServiceModal=false">
+  <div class="modal">
+    <h3 class="text-lg font-bold text-slate-800 mb-5" x-text="editingService ? 'Edit Service' : 'Add Service'"></h3>
+    <div class="space-y-4">
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <label class="label">Emoji</label>
+          <input x-model="serviceForm.emoji" class="input text-center text-2xl" placeholder="✂️" maxlength="4">
+        </div>
+        <div>
+          <label class="label">Name *</label>
+          <input x-model="serviceForm.name" class="input" placeholder="Haircut">
+        </div>
+      </div>
+      <div>
+        <label class="label">Description</label>
+        <input x-model="serviceForm.description" class="input" placeholder="Short description shown to customers">
+      </div>
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <label class="label">Duration (minutes)</label>
+          <input type="number" x-model="serviceForm.duration" class="input" min="5" step="5" placeholder="30">
+        </div>
+        <div>
+          <label class="label">Price (<span x-text="settings.currency"></span>)</label>
+          <input type="number" x-model="serviceForm.price" class="input" min="0" step="0.50" placeholder="35">
+        </div>
+      </div>
+    </div>
+    <div class="flex gap-3 mt-6">
+      <button @click="saveService()" class="btn-primary flex-1" x-text="editingService ? 'Save Changes' : 'Add Service'"></button>
+      <button @click="showServiceModal=false" class="btn-secondary flex-1">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Toast notifications ─────────────────────────────────────────────────── -->
+<div x-show="toast" x-transition class="fixed bottom-6 right-6 bg-slate-800 text-white px-5 py-3 rounded-xl shadow-xl text-sm" x-text="toast"></div>
+
+<script>
+function app() {
+  return {
+    // Auth
+    authenticated: false,
+    loginPassword: '',
+    loginError: '',
+
+    // Nav
+    page: 'dashboard',
+
+    // Data
+    stats: {},
+    todayAppointments: [],
+    appointments: [],
+    employees: [],
+    services: [],
+    botMessages: [],
+    settings: { currency: 'SRD', shop_name: '' },
+    weeklyHours: [],
+    apptFilter: { date: '', employee_id: '', status: '' },
+    selectedHoursEmployee: null,
+
+    // UI state
+    botPaused: false,
+    showEmployeeModal: false,
+    showServiceModal: false,
+    editingEmployee: null,
+    editingService: null,
+    employeeForm: { name: '', phone: '', color: '#f59e0b', google_calendar_id: '' },
+    serviceForm: { name: '', emoji: '✂️', description: '', duration: 30, price: 0 },
+    hoursSaved: false,
+    messagesSaved: false,
+    settingsSaved: false,
+    toast: '',
+
+    get shopName() { return this.settings.shop_name || 'Barbershop Admin'; },
+
+    async init() {
+      const { authenticated } = await this.api('GET', '/api/auth/status');
+      if (authenticated) {
+        this.authenticated = true;
+        await this.bootstrap();
+      }
+    },
+
+    async login() {
+      this.loginError = '';
+      const res = await this.api('POST', '/api/auth/login', { password: this.loginPassword });
+      if (res.ok) {
+        this.authenticated = true;
+        this.loginPassword = '';
+        await this.bootstrap();
+      } else {
+        this.loginError = 'Incorrect password';
+      }
+    },
+
+    async logout() {
+      await this.api('POST', '/api/auth/logout');
+      this.authenticated = false;
+    },
+
+    async bootstrap() {
+      this.settings  = await this.api('GET', '/api/settings');
+      this.employees = await this.api('GET', '/api/employees');
+      this.botPaused = this.settings.bot_paused === '1';
+      await this.loadDashboard();
+    },
+
+    async nav(p) {
+      this.page = p;
+      if (p === 'dashboard')    await this.loadDashboard();
+      if (p === 'appointments') await this.loadAppointments();
+      if (p === 'employees')    this.employees = await this.api('GET', '/api/employees');
+      if (p === 'hours')        await this.loadHours();
+      if (p === 'services')     this.services = await this.api('GET', '/api/services');
+      if (p === 'messages')     this.botMessages = await this.api('GET', '/api/messages');
+      if (p === 'settings') {
+        this.settings = await this.api('GET', '/api/settings');
+        this.botPaused = this.settings.bot_paused === '1';
+      }
+    },
+
+    async loadDashboard() {
+      const data = await this.api('GET', '/api/dashboard');
+      this.stats              = data.stats || {};
+      this.todayAppointments  = data.today || [];
+    },
+
+    async loadAppointments() {
+      const params = new URLSearchParams();
+      if (this.apptFilter.date)        params.set('date',        this.apptFilter.date);
+      if (this.apptFilter.employee_id) params.set('employee_id', this.apptFilter.employee_id);
+      if (this.apptFilter.status)      params.set('status',      this.apptFilter.status);
+      this.appointments = await this.api('GET', `/api/appointments?${params}`);
+    },
+
+    async loadHours() {
+      const url = this.selectedHoursEmployee != null
+        ? `/api/hours/${this.selectedHoursEmployee}`
+        : '/api/hours';
+      this.weeklyHours = await this.api('GET', url);
+    },
+
+    async saveHours() {
+      const url = this.selectedHoursEmployee != null
+        ? `/api/hours/${this.selectedHoursEmployee}`
+        : '/api/hours';
+      await this.api('PUT', url, this.weeklyHours);
+      this.hoursSaved = true;
+      setTimeout(() => this.hoursSaved = false, 3000);
+      this.showToast('✅ Hours saved!');
+    },
+
+    async saveMessages() {
+      const obj = Object.fromEntries(this.botMessages.map(m => [m.key, m.value]));
+      await this.api('PUT', '/api/messages', obj);
+      this.messagesSaved = true;
+      setTimeout(() => this.messagesSaved = false, 3000);
+      this.showToast('✅ Messages saved!');
+    },
+
+    async saveSettings() {
+      await this.api('PUT', '/api/settings', this.settings);
+      this.settingsSaved = true;
+      setTimeout(() => this.settingsSaved = false, 3000);
+      this.showToast('✅ Settings saved!');
+    },
+
+    async toggleBotPause() {
+      this.botPaused = !this.botPaused;
+      await this.api('PUT', '/api/settings', { bot_paused: this.botPaused ? '1' : '0' });
+      this.showToast(this.botPaused ? '⏸ Bot paused' : '▶️ Bot resumed');
+    },
+
+    // Employee CRUD
+    openEmployeeModal(emp = null) {
+      this.editingEmployee = emp;
+      this.employeeForm = emp
+        ? { name: emp.name, phone: emp.phone, color: emp.color, google_calendar_id: emp.google_calendar_id }
+        : { name: '', phone: '', color: '#f59e0b', google_calendar_id: '' };
+      this.showEmployeeModal = true;
+    },
+
+    async saveEmployee() {
+      if (!this.employeeForm.name) return;
+      if (this.editingEmployee) {
+        await this.api('PUT', `/api/employees/${this.editingEmployee.id}`, this.employeeForm);
+      } else {
+        await this.api('POST', '/api/employees', this.employeeForm);
+      }
+      this.employees = await this.api('GET', '/api/employees');
+      this.showEmployeeModal = false;
+      this.showToast(this.editingEmployee ? '✅ Barber updated!' : '✅ Barber added!');
+    },
+
+    async toggleEmployee(id) {
+      await this.api('POST', `/api/employees/${id}/toggle`);
+      this.employees = await this.api('GET', '/api/employees');
+    },
+
+    // Service CRUD
+    openServiceModal(svc = null) {
+      this.editingService = svc;
+      this.serviceForm = svc
+        ? { name: svc.name, emoji: svc.emoji, description: svc.description, duration: svc.duration, price: svc.price }
+        : { name: '', emoji: '✂️', description: '', duration: 30, price: 0 };
+      this.showServiceModal = true;
+    },
+
+    async saveService() {
+      if (!this.serviceForm.name) return;
+      const body = { ...this.serviceForm, duration: +this.serviceForm.duration, price: +this.serviceForm.price };
+      if (this.editingService) {
+        await this.api('PUT', `/api/services/${this.editingService.id}`, body);
+      } else {
+        await this.api('POST', '/api/services', body);
+      }
+      this.services = await this.api('GET', '/api/services');
+      this.showServiceModal = false;
+      this.showToast(this.editingService ? '✅ Service updated!' : '✅ Service added!');
+    },
+
+    async toggleService(id) {
+      await this.api('POST', `/api/services/${id}/toggle`);
+      this.services = await this.api('GET', '/api/services');
+    },
+
+    // Appointment actions
+    async markStatus(id, status) {
+      if (!status) return;
+      await this.api('PUT', `/api/appointments/${id}`, { status });
+      await this.loadDashboard();
+      if (this.page === 'appointments') await this.loadAppointments();
+      this.showToast(`✅ Marked as ${status}`);
+    },
+
+    // Helpers
+    statusBadge(s) {
+      return { confirmed: 'badge-blue', completed: 'badge-green', cancelled: 'badge-red', 'no-show': 'badge-orange' }[s] || 'badge-gray';
+    },
+
+    fmtTime(dt) {
+      if (!dt) return '—';
+      return new Date(dt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+    },
+
+    fmtDateTime(dt) {
+      if (!dt) return '—';
+      const d = new Date(dt);
+      return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ' ' + this.fmtTime(dt);
+    },
+
+    showToast(msg) {
+      this.toast = msg;
+      setTimeout(() => this.toast = '', 3000);
+    },
+
+    async api(method, url, body) {
+      const opts = { method, headers: { 'Content-Type': 'application/json' } };
+      if (body) opts.body = JSON.stringify(body);
+      try {
+        const r = await fetch(url, opts);
+        if (r.status === 401) { this.authenticated = false; return {}; }
+        return await r.json();
+      } catch (e) {
+        this.showToast('❌ Network error');
+        return {};
+      }
+    },
+  };
+}
+</script>
+</body>
+</html>

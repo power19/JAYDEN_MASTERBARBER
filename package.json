@@ -1,7 +1,7 @@
 {
   "name": "jayden-barbershop-bot",
-  "version": "1.0.0",
-  "description": "WhatsApp booking bot for Jayden's Barbershop — menu, services & Google Calendar appointments",
+  "version": "2.0.0",
+  "description": "WhatsApp booking bot + admin dashboard for Jayden's Barbershop",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
@@ -10,12 +10,21 @@
   "engines": {
     "node": ">=18.0.0"
   },
-  "keywords": ["whatsapp", "bot", "barbershop", "booking", "google-calendar"],
+  "keywords": [
+    "whatsapp",
+    "bot",
+    "barbershop",
+    "booking",
+    "google-calendar"
+  ],
   "author": "Jayden's Barbershop",
   "license": "MIT",
   "dependencies": {
     "dotenv": "^16.4.5",
+    "express": "^4.22.2",
+    "express-session": "^1.19.0",
     "googleapis": "^140.0.1",
+    "memorystore": "^1.6.8",
     "qrcode-terminal": "^0.12.0",
     "whatsapp-web.js": "^1.23.0"
   },
