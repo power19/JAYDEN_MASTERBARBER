@@ -3,7 +3,9 @@
     "allow": [
       "Read(//mnt/c/Users/brian/Documents/**)",
       "Bash(npm install *)",
-      "mcp__Claude_Preview__preview_start"
+      "mcp__Claude_Preview__preview_start",
+      "Bash(cmd /c \"npm install qrcode\")",
+      "Bash(cmd /c \"npm install qrcode 2>&1\")"
     ]
   }
 }

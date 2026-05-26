@@ -29,7 +29,9 @@
 <body class="bg-slate-100 font-sans" x-data="app()" x-cloak>
 
 <!-- ── Login Screen ───────────────────────────────────────────────────────── -->
-<div x-show="!authenticated" class="min-h-screen flex items-center justify-center">
+<div x-show="!authenticated" class="min-h-screen flex flex-col items-center justify-center gap-6 p-4">
+
+  <!-- Login card -->
   <div class="bg-white rounded-2xl shadow-xl p-10 w-full max-w-sm">
     <div class="text-center mb-8">
       <div class="text-5xl mb-3">💈</div>
@@ -43,6 +45,17 @@
       <button type="submit" class="btn-primary w-full py-2.5">Sign In</button>
     </form>
   </div>
+
+  <!-- QR card (shown pre-login when bot needs scanning) -->
+  <div x-show="waStatus.status === 'qr' && waStatus.qrDataUrl"
+       class="bg-white rounded-2xl shadow-xl p-6 w-full max-w-sm text-center">
+    <p class="text-sm font-semibold text-slate-700 mb-1">📱 Scan to connect WhatsApp</p>
+    <p class="text-xs text-slate-400 mb-4">Open WhatsApp → Linked Devices → Link a Device</p>
+    <img :src="waStatus.qrDataUrl" alt="WhatsApp QR"
+         class="w-48 h-48 mx-auto rounded-xl border border-slate-100 shadow-sm">
+    <p class="text-xs text-slate-400 mt-3 animate-pulse">Waiting for scan…</p>
+  </div>
+
 </div>
 
 <!-- ── Main App ───────────────────────────────────────────────────────────── -->
@@ -81,6 +94,11 @@
             class="inline-block h-4 w-4 rounded-full bg-white shadow mt-1 transition-transform"></span>
         </button>
       </div>
+      <!-- WhatsApp connection status -->
+      <div class="flex items-center gap-2 mb-3">
+        <span class="w-2.5 h-2.5 rounded-full flex-shrink-0" :class="waStatusLabel.dot"></span>
+        <span class="text-slate-400 text-xs">WhatsApp: <span x-text="waStatusLabel.text"></span></span>
+      </div>
       <button @click="logout()" class="sidebar-link w-full text-left text-slate-400 hover:text-red-400">🚪 Sign Out</button>
     </div>
   </aside>
@@ -109,6 +127,73 @@
         <div class="card text-center">
           <div class="text-3xl font-bold text-purple-500" x-text="stats.upcoming ?? '—'"></div>
           <div class="text-slate-500 text-sm mt-1">Upcoming</div>
+        </div>
+      </div>
+
+      <!-- WhatsApp QR / Status card (shown when bot isn't connected) -->
+      <div x-show="waStatus.status !== 'ready' && waStatus.status !== 'loading'"
+           class="card mb-8 border-amber-200 bg-amber-50">
+        <div class="flex items-start gap-5">
+
+          <!-- QR image (only when status === 'qr') -->
+          <template x-if="waStatus.status === 'qr' && waStatus.qrDataUrl">
+            <div class="flex-shrink-0">
+              <img :src="waStatus.qrDataUrl" alt="WhatsApp QR code"
+                   class="w-44 h-44 rounded-xl border border-amber-200 shadow-sm">
+            </div>
+          </template>
+
+          <!-- Spinner / icon for non-QR states -->
+          <template x-if="waStatus.status !== 'qr' || !waStatus.qrDataUrl">
+            <div class="flex-shrink-0 w-44 h-44 rounded-xl border border-amber-200 bg-white flex items-center justify-center">
+              <template x-if="waStatus.status === 'initializing' || waStatus.status === 'authenticated'">
+                <svg class="w-10 h-10 text-amber-400 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path>
+                </svg>
+              </template>
+              <template x-if="waStatus.status === 'disconnected'">
+                <span class="text-5xl">⚠️</span>
+              </template>
+              <template x-if="waStatus.status === 'not-running'">
+                <span class="text-5xl">💤</span>
+              </template>
+            </div>
+          </template>
+
+          <!-- Text description -->
+          <div class="flex-1 min-w-0 py-2">
+            <h3 class="text-base font-bold text-slate-800 mb-1">
+              📱 WhatsApp Bot
+              <span class="ml-2 text-sm font-normal" :class="{
+                'text-yellow-600': ['qr','initializing','authenticated'].includes(waStatus.status),
+                'text-red-500':    waStatus.status === 'disconnected',
+                'text-slate-500':  waStatus.status === 'not-running',
+              }" x-text="waStatusLabel.text"></span>
+            </h3>
+
+            <template x-if="waStatus.status === 'qr'">
+              <div>
+                <p class="text-slate-600 text-sm mb-2">Open WhatsApp on the barber's phone, go to <strong>Linked Devices → Link a Device</strong>, and scan the QR code.</p>
+                <p class="text-xs text-slate-400">The code refreshes every ~60 seconds — this panel updates automatically.</p>
+              </div>
+            </template>
+
+            <template x-if="waStatus.status === 'initializing' || waStatus.status === 'authenticated'">
+              <p class="text-slate-600 text-sm">Connecting to WhatsApp — please wait…</p>
+            </template>
+
+            <template x-if="waStatus.status === 'disconnected'">
+              <div>
+                <p class="text-slate-600 text-sm mb-2">The WhatsApp connection was lost. Restart the server to reconnect.</p>
+                <p class="text-xs text-slate-400">If the problem persists, delete <code class="bg-slate-100 px-1 rounded">.wwebjs_auth/</code> and restart to re-scan.</p>
+              </div>
+            </template>
+
+            <template x-if="waStatus.status === 'not-running'">
+              <p class="text-slate-600 text-sm">The WhatsApp bot is not running. Start the server with <code class="bg-slate-100 px-1 rounded">npm start</code> to enable it.</p>
+            </template>
+          </div>
         </div>
       </div>
 
@@ -522,6 +607,9 @@ function app() {
     apptFilter: { date: '', employee_id: '', status: '' },
     selectedHoursEmployee: null,
 
+    // WhatsApp connection state
+    waStatus: { status: 'loading', qrDataUrl: null, lastUpdated: null },
+
     // UI state
     botPaused: false,
     showEmployeeModal: false,
@@ -538,11 +626,35 @@ function app() {
     get shopName() { return this.settings.shop_name || 'Barbershop Admin'; },
 
     async init() {
+      // Poll WhatsApp status from the start (even before login — QR must be visible pre-auth)
+      await this.loadWhatsappStatus();
+      setInterval(() => this.loadWhatsappStatus(), 3000);
+
       const { authenticated } = await this.api('GET', '/api/auth/status');
       if (authenticated) {
         this.authenticated = true;
         await this.bootstrap();
       }
+    },
+
+    async loadWhatsappStatus() {
+      try {
+        const r = await fetch('/api/whatsapp/status');
+        if (r.ok) this.waStatus = await r.json();
+      } catch (_) {}
+    },
+
+    get waStatusLabel() {
+      const map = {
+        'loading':       { text: 'Loading…',       dot: 'bg-slate-400' },
+        'not-running':   { text: 'Not running',     dot: 'bg-slate-400' },
+        'initializing':  { text: 'Starting…',       dot: 'bg-yellow-400 animate-pulse' },
+        'qr':            { text: 'Scan QR code',    dot: 'bg-yellow-400 animate-pulse' },
+        'authenticated': { text: 'Connecting…',     dot: 'bg-blue-400 animate-pulse' },
+        'ready':         { text: 'Connected',        dot: 'bg-emerald-400' },
+        'disconnected':  { text: 'Disconnected',    dot: 'bg-red-400' },
+      };
+      return map[this.waStatus?.status] || map['loading'];
     },
 
     async login() {

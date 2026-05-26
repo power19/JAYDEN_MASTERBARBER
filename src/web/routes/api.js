@@ -2,9 +2,10 @@
  * REST API for the admin dashboard.
  * All routes are under /api and require authentication.
  */
-const express = require('express');
-const router  = express.Router();
-const q       = require('../../db/queries');
+const express   = require('express');
+const router    = express.Router();
+const q         = require('../../db/queries');
+const { state: waState } = require('../../whatsapp-state');
 
 // ── Auth middleware ───────────────────────────────────────────────────────────
 
@@ -32,6 +33,18 @@ router.post('/auth/logout', (req, res) => {
 
 router.get('/auth/status', (req, res) => {
   res.json({ authenticated: !!req.session?.authenticated });
+});
+
+// ── WhatsApp status (no auth — needed to show QR before login) ───────────────
+// Returns connection status and QR data URL when available.
+// The QR image itself is safe to expose publicly — it's a one-time-use code
+// and expires in ~60 seconds anyway.
+router.get('/whatsapp/status', (req, res) => {
+  res.json({
+    status:    waState.status,
+    qrDataUrl: waState.status === 'qr' ? waState.qrDataUrl : null,
+    lastUpdated: waState.lastUpdated,
+  });
 });
 
 // ── Apply auth to all routes below ───────────────────────────────────────────
