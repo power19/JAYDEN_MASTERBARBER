@@ -8,8 +8,9 @@
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
   <style>
     [x-cloak] { display: none !important; }
-    .sidebar-link { @apply flex items-center gap-3 px-4 py-2.5 rounded-lg text-white hover:bg-white/10 hover:text-white transition-all text-sm font-medium; }
-    .sidebar-link.active { @apply bg-amber-500/20 text-amber-400; }
+    .sidebar-link { display:flex; align-items:center; gap:0.75rem; padding:0.625rem 1rem; border-radius:0.5rem; color:#fff; font-size:0.875rem; font-weight:600; transition:background 0.15s, color 0.15s; width:100%; text-align:left; }
+    .sidebar-link:hover { background:rgba(255,255,255,0.1); }
+    .sidebar-link.active { background:rgba(245,158,11,0.2); color:#fbbf24; }
     .badge { @apply inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium; }
     .badge-green  { @apply bg-emerald-100 text-emerald-700; }
     .badge-red    { @apply bg-red-100 text-red-700; }
@@ -86,7 +87,7 @@
     <div class="p-4 border-t border-white/10">
       <!-- Bot pause toggle -->
       <div class="flex items-center justify-between mb-3">
-        <span class="text-slate-300 text-xs font-medium">Bot Active</span>
+        <span class="text-white text-xs font-semibold">Bot Active</span>
         <button @click="toggleBotPause()"
           :class="botPaused ? 'bg-slate-600' : 'bg-amber-500'"
           class="relative inline-flex h-6 w-11 rounded-full transition-colors">
@@ -97,9 +98,9 @@
       <!-- WhatsApp connection status -->
       <div class="flex items-center gap-2 mb-3">
         <span class="w-2.5 h-2.5 rounded-full flex-shrink-0" :class="waStatusLabel.dot"></span>
-        <span class="text-slate-400 text-xs">WhatsApp: <span x-text="waStatusLabel.text"></span></span>
+        <span class="text-white/70 text-xs">WhatsApp: <span x-text="waStatusLabel.text"></span></span>
       </div>
-      <button @click="logout()" class="sidebar-link w-full text-left text-slate-400 hover:text-red-400">🚪 Sign Out</button>
+      <button @click="logout()" class="sidebar-link" style="color:rgba(255,255,255,0.55)" onmouseover="this.style.color='#f87171'" onmouseout="this.style.color='rgba(255,255,255,0.55)'">🚪 Sign Out</button>
     </div>
   </aside>
 
