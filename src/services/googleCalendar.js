@@ -40,7 +40,7 @@ async function _getCalendar() {
  * @param {string}  [opts.calendarId]    - overrides the default calendar
  * @param {string}  [opts.employeeName]  - shown in event title
  */
-async function createAppointment({ service, startTime, endTime, customerName, customerPhone, calendarId, employeeName }) {
+async function createAppointment({ service, startTime, endTime, customerName, bookingCode, calendarId, employeeName }) {
   const timezone   = process.env.TIMEZONE || 'America/Paramaribo';
   const currency   = process.env.CURRENCY || 'SRD';
   const targetCal  = calendarId || DEFAULT_CALENDAR_ID;
@@ -57,7 +57,7 @@ async function createAppointment({ service, startTime, endTime, customerName, cu
         `📋 Service : ${service.name}`,
         employeeName ? `✂️  Barber  : ${employeeName}` : '',
         `👤 Customer: ${customerName}`,
-        `📱 WhatsApp: +${customerPhone}`,
+        `🎫 Code    : ${bookingCode}`,
         `💰 Price   : ${currency} ${service.price}`,
         `⏱️  Duration: ${service.duration} min`,
         '',

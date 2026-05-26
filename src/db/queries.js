@@ -130,11 +130,34 @@ function getDashboardStats() {
   };
 }
 
+/**
+ * Generates a unique 4-character booking code.
+ * Uses an unambiguous alphabet (no 0/O, 1/I/L) so codes are easy to read aloud.
+ * The code is shown to customers and in all visible records — the actual phone
+ * number is stored separately and never displayed in the UI.
+ */
+function generateBookingCode() {
+  const ALPHA = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // 32 chars, no confusables
+  let code, tries = 0;
+  do {
+    code = Array.from({ length: 4 }, () =>
+      ALPHA[Math.floor(Math.random() * ALPHA.length)]
+    ).join('');
+    tries++;
+    // Ensure uniqueness against active/confirmed bookings
+    const clash = db.appointments.findOne(a => a.booking_code === code && a.status !== 'cancelled');
+    if (!clash) break;
+  } while (tries < 200);
+  return code;
+}
+
 function createAppointment(data) {
-  return db.appointments.insert({
+  const booking_code = generateBookingCode();
+  const result = db.appointments.insert({
+    booking_code,                              // ← unique 4-char code shown everywhere
     employee_id:      data.employee_id || null,
     customer_name:    data.customer_name,
-    customer_phone:   data.customer_phone,
+    customer_phone:   data.customer_phone,     // ← stored in JSON only, never shown in UI
     service_id:       data.service_id,
     service_name:     data.service_name,
     service_emoji:    data.service_emoji || '',
@@ -146,6 +169,8 @@ function createAppointment(data) {
     status:           data.status || 'confirmed',
     notes:            data.notes || '',
   });
+  // Return the code alongside the insert result so callers can show it
+  return { ...result, booking_code };
 }
 
 function updateAppointment(id, { status, notes, google_event_id } = {}) {

@@ -248,11 +248,11 @@ async function onConfirm(userId, text, session) {
     assignedEmployee = q.getEmployee(empId);
   }
 
-  // Save to database
+  // Save to database — phone stored privately in JSON, booking_code shown everywhere
   const dbResult = q.createAppointment({
     employee_id:      assignedEmployee?.id || null,
     customer_name:    userName,
-    customer_phone:   userId.replace('@c.us', ''),
+    customer_phone:   userId.replace('@c.us', ''), // never displayed; stored in data/appointments.json only
     service_id:       selectedService.id,
     service_name:     selectedService.name,
     service_emoji:    selectedService.emoji,
@@ -261,6 +261,8 @@ async function onConfirm(userId, text, session) {
     start_time:       selectedTime.start,
     end_time:         selectedTime.end,
   });
+
+  const bookingCode = dbResult.booking_code; // unique 4-char code, e.g. "AX7K"
 
   // Sync to Google Calendar (best-effort)
   try {
@@ -271,7 +273,8 @@ async function onConfirm(userId, text, session) {
         startTime:     selectedTime.start,
         endTime:       selectedTime.end,
         customerName:  userName,
-        customerPhone: userId.replace('@c.us', ''),
+        bookingCode,                    // ← code replaces phone in calendar event
+        employeeName:  assignedEmployee?.name,
         calendarId:    calId,
       });
       if (calResult.success) {
@@ -290,6 +293,9 @@ async function onConfirm(userId, text, session) {
 
   return [
     `🎉 *Appointment Confirmed!*`,
+    ``,
+    `🎫 *Booking Code: ${bookingCode}*`,
+    `   _Save this code — you may need it to reschedule._`,
     ``,
     `👤 *${userName}*`,
     assignedEmployee ? `💈 Barber: *${assignedEmployee.name}*` : '',
