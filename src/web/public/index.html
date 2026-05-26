@@ -198,8 +198,8 @@
 
             <template x-if="waStatus.status === 'not-running'">
               <div>
-                <p class="text-slate-600 text-sm mb-4">The WhatsApp bot is not running alongside this dashboard. Restart the server with <code class="bg-slate-100 px-1 rounded">npm start</code> to enable it.</p>
-                <button @click="window.location.reload()" class="btn-secondary text-xs">↺ Reload Page</button>
+                <p class="text-slate-600 text-sm mb-4">The WhatsApp bot is not connected. Click the button below to start it — a QR code will appear for scanning.</p>
+                <button @click="startBot()" class="btn-primary text-xs">▶️ Start Bot</button>
               </div>
             </template>
           </div>
@@ -669,6 +669,14 @@ function app() {
         const r = await fetch('/api/whatsapp/status');
         if (r.ok) this.waStatus = await r.json();
       } catch (_) {}
+    },
+
+    async startBot() {
+      this.showToast('▶️ Starting WhatsApp bot…');
+      const res = await this.api('POST', '/api/whatsapp/reconnect');
+      if (res.error) this.showToast('❌ ' + res.error);
+      else this.showToast('📱 Bot starting — scan the QR code when it appears');
+      await this.loadWhatsappStatus();
     },
 
     async reconnectBot() {

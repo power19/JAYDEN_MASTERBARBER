@@ -7,6 +7,7 @@ const router    = express.Router();
 const q                  = require('../../db/queries');
 const { state: waState, update: waUpdate } = require('../../whatsapp-state');
 const { getClient }      = require('../../whatsapp-client');
+const { startBot }       = require('../../bot-runner');
 
 // ── Auth middleware ───────────────────────────────────────────────────────────
 
@@ -56,15 +57,11 @@ router.get('/whatsapp/status', (req, res) => {
 // ── Apply auth to all routes below ───────────────────────────────────────────
 router.use(requireAuth);
 
+// Works for all states: not-running, disconnected, or stuck.
+// startBot() is idempotent — safe to call even if already active.
 router.post('/whatsapp/reconnect', async (req, res) => {
   try {
-    const client = getClient();
-    if (!client) {
-      return res.status(400).json({ error: 'Bot is not running in this mode. Start the server with `npm start`.' });
-    }
-    waUpdate({ status: 'initializing', qrDataUrl: null });
-    await client.destroy().catch(() => {});
-    client.initialize();
+    await startBot();
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
