@@ -8,7 +8,7 @@
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
   <style>
     [x-cloak] { display: none !important; }
-    .sidebar-link { @apply flex items-center gap-3 px-4 py-2.5 rounded-lg text-slate-300 hover:bg-white/10 hover:text-white transition-all text-sm font-medium; }
+    .sidebar-link { @apply flex items-center gap-3 px-4 py-2.5 rounded-lg text-white hover:bg-white/10 hover:text-white transition-all text-sm font-medium; }
     .sidebar-link.active { @apply bg-amber-500/20 text-amber-400; }
     .badge { @apply inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium; }
     .badge-green  { @apply bg-emerald-100 text-emerald-700; }
@@ -175,23 +175,31 @@
             <template x-if="waStatus.status === 'qr'">
               <div>
                 <p class="text-slate-600 text-sm mb-2">Open WhatsApp on the barber's phone, go to <strong>Linked Devices → Link a Device</strong>, and scan the QR code.</p>
-                <p class="text-xs text-slate-400">The code refreshes every ~60 seconds — this panel updates automatically.</p>
+                <p class="text-xs text-slate-400 mb-4">The code refreshes every ~60 seconds — this panel updates automatically.</p>
+                <button @click="reconnectBot()" class="btn-secondary text-xs">🔄 Refresh QR</button>
               </div>
             </template>
 
             <template x-if="waStatus.status === 'initializing' || waStatus.status === 'authenticated'">
-              <p class="text-slate-600 text-sm">Connecting to WhatsApp — please wait…</p>
+              <div>
+                <p class="text-slate-600 text-sm mb-4">Connecting to WhatsApp — please wait…</p>
+                <button @click="loadWhatsappStatus()" class="btn-secondary text-xs">↺ Check status</button>
+              </div>
             </template>
 
             <template x-if="waStatus.status === 'disconnected'">
               <div>
-                <p class="text-slate-600 text-sm mb-2">The WhatsApp connection was lost. Restart the server to reconnect.</p>
-                <p class="text-xs text-slate-400">If the problem persists, delete <code class="bg-slate-100 px-1 rounded">.wwebjs_auth/</code> and restart to re-scan.</p>
+                <p class="text-slate-600 text-sm mb-2">The WhatsApp connection was lost.</p>
+                <p class="text-xs text-slate-400 mb-4">If reconnecting repeatedly fails, delete <code class="bg-slate-100 px-1 rounded">.wwebjs_auth/</code> and reconnect to re-scan.</p>
+                <button @click="reconnectBot()" class="btn-primary text-xs">🔄 Reconnect Bot</button>
               </div>
             </template>
 
             <template x-if="waStatus.status === 'not-running'">
-              <p class="text-slate-600 text-sm">The WhatsApp bot is not running. Start the server with <code class="bg-slate-100 px-1 rounded">npm start</code> to enable it.</p>
+              <div>
+                <p class="text-slate-600 text-sm mb-4">The WhatsApp bot is not running alongside this dashboard. Restart the server with <code class="bg-slate-100 px-1 rounded">npm start</code> to enable it.</p>
+                <button @click="window.location.reload()" class="btn-secondary text-xs">↺ Reload Page</button>
+              </div>
             </template>
           </div>
         </div>
@@ -642,6 +650,13 @@ function app() {
         const r = await fetch('/api/whatsapp/status');
         if (r.ok) this.waStatus = await r.json();
       } catch (_) {}
+    },
+
+    async reconnectBot() {
+      this.showToast('🔄 Reconnecting WhatsApp…');
+      const res = await this.api('POST', '/api/whatsapp/reconnect');
+      if (res.error) this.showToast('❌ ' + res.error);
+      await this.loadWhatsappStatus();
     },
 
     get waStatusLabel() {

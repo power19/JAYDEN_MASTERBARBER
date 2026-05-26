@@ -4,8 +4,9 @@
  */
 const express   = require('express');
 const router    = express.Router();
-const q         = require('../../db/queries');
-const { state: waState } = require('../../whatsapp-state');
+const q                  = require('../../db/queries');
+const { state: waState, update: waUpdate } = require('../../whatsapp-state');
+const { getClient }      = require('../../whatsapp-client');
 
 // ── Auth middleware ───────────────────────────────────────────────────────────
 
@@ -47,8 +48,26 @@ router.get('/whatsapp/status', (req, res) => {
   });
 });
 
+// ── WhatsApp reconnect (auth-protected) ──────────────────────────────────────
+// POST /api/whatsapp/reconnect — tears down the existing session and calls
+// client.initialize() again so a fresh QR is generated without a server restart.
+// Only works when the bot is running (status !== 'not-running').
+
 // ── Apply auth to all routes below ───────────────────────────────────────────
 router.use(requireAuth);
+
+router.post('/whatsapp/reconnect', async (req, res) => {
+  try {
+    const client = getClient();
+    if (!client) {
+      return res.status(400).json({ error: 'Bot is not running in this mode. Start the server with `npm start`.' });
+    }
+    waUpdate({ status: 'initializing', qrDataUrl: null });
+    await client.destroy().catch(() => {});
+    client.initialize();
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 
 // ── Dashboard ─────────────────────────────────────────────────────────────────
 

@@ -7,11 +7,12 @@ require('dotenv').config();
 
 const qrcodeTerminal       = require('qrcode-terminal');
 const QRCode               = require('qrcode');
-const { createBot }        = require('./bot');
-const { handleMessage }    = require('./handlers/conversationHandler');
-const { createServer }     = require('./web/server');
-const q                    = require('./db/queries');
-const { update: waUpdate } = require('./whatsapp-state');
+const { createBot }             = require('./bot');
+const { handleMessage }         = require('./handlers/conversationHandler');
+const { createServer }          = require('./web/server');
+const q                         = require('./db/queries');
+const { update: waUpdate }      = require('./whatsapp-state');
+const { setClient }             = require('./whatsapp-client');
 
 const shopName = q.getSetting('shop_name') || "Jayden's Barbershop";
 
@@ -29,6 +30,7 @@ createServer().catch(err => {
 
 // ── Start the WhatsApp bot ────────────────────────────────────────────────────
 const client = createBot();
+setClient(client);          // share reference so the API can reconnect
 waUpdate({ status: 'initializing' });
 
 client.on('qr', async (qr) => {
@@ -93,8 +95,9 @@ client.on('message', async (msg) => {
 
 client.on('disconnected', (reason) => {
   console.log('⚠️  WhatsApp disconnected:', reason);
+  console.log('   → Dashboard still running — use the Reconnect button or restart the server.');
   waUpdate({ status: 'disconnected', qrDataUrl: null });
-  process.exit(0);
+  // Don't exit — keep the web dashboard alive so the admin can reconnect without a terminal restart.
 });
 
 process.on('SIGINT', async () => {
