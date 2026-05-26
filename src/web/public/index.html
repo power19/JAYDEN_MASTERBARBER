@@ -513,81 +513,99 @@
 </div>
 
 <!-- ── Employee Modal ──────────────────────────────────────────────────────── -->
-<div x-show="showEmployeeModal" class="modal-overlay" @click.self="showEmployeeModal=false">
-  <div class="modal">
-    <h3 class="text-lg font-bold text-slate-800 mb-5" x-text="editingEmployee ? 'Edit Barber' : 'Add Barber'"></h3>
-    <div class="space-y-4">
-      <div>
-        <label class="label">Full Name *</label>
-        <input x-model="employeeForm.name" class="input" placeholder="Jayden" required>
+<template x-if="showEmployeeModal">
+  <div class="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"
+       @click.self="showEmployeeModal=false">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6"
+         x-transition:enter="transition ease-out duration-200"
+         x-transition:enter-start="opacity-0 scale-95"
+         x-transition:enter-end="opacity-100 scale-100">
+      <div class="flex items-center justify-between mb-5">
+        <h3 class="text-lg font-bold text-slate-800" x-text="editingEmployee ? 'Edit Barber' : 'Add Barber'"></h3>
+        <button @click="showEmployeeModal=false" class="text-slate-400 hover:text-slate-600 text-xl leading-none">&times;</button>
       </div>
-      <div>
-        <label class="label">Phone Number</label>
-        <input x-model="employeeForm.phone" class="input" placeholder="+597 XXX-XXXX">
-      </div>
-      <div>
-        <label class="label">Color</label>
-        <div class="flex gap-2 flex-wrap mt-1">
-          <template x-for="c in ['#f59e0b','#10b981','#3b82f6','#8b5cf6','#ef4444','#ec4899','#64748b']" :key="c">
-            <button type="button" @click="employeeForm.color = c"
-              class="w-8 h-8 rounded-full border-2 transition"
-              :class="employeeForm.color === c ? 'border-slate-800 scale-110' : 'border-transparent'"
-              :style="`background:${c}`"></button>
-          </template>
+      <div class="space-y-4">
+        <div>
+          <label class="label">Full Name *</label>
+          <input x-model="employeeForm.name" class="input" placeholder="Jayden" required>
+        </div>
+        <div>
+          <label class="label">Phone Number</label>
+          <input x-model="employeeForm.phone" class="input" placeholder="+597 XXX-XXXX">
+        </div>
+        <div>
+          <label class="label">Color</label>
+          <div class="flex gap-2 flex-wrap mt-1">
+            <template x-for="c in ['#f59e0b','#10b981','#3b82f6','#8b5cf6','#ef4444','#ec4899','#64748b']" :key="c">
+              <button type="button" @click="employeeForm.color = c"
+                class="w-8 h-8 rounded-full border-2 transition"
+                :class="employeeForm.color === c ? 'border-slate-800 scale-110' : 'border-transparent'"
+                :style="`background:${c}`"></button>
+            </template>
+          </div>
+        </div>
+        <div>
+          <label class="label">Google Calendar ID <span class="normal-case font-normal">(optional)</span></label>
+          <input x-model="employeeForm.google_calendar_id" class="input font-mono text-xs"
+            placeholder="example@gmail.com or calendar ID">
+          <p class="text-xs text-slate-400 mt-1">Events for this barber will sync to this calendar.</p>
         </div>
       </div>
-      <div>
-        <label class="label">Google Calendar ID <span class="normal-case font-normal">(optional)</span></label>
-        <input x-model="employeeForm.google_calendar_id" class="input font-mono text-xs"
-          placeholder="example@gmail.com or calendar ID">
-        <p class="text-xs text-slate-400 mt-1">Events for this barber will sync to this calendar.</p>
+      <div class="flex gap-3 mt-6">
+        <button @click="saveEmployee()" class="btn-primary flex-1">
+          <span x-text="editingEmployee ? 'Save Changes' : 'Add Barber'"></span>
+        </button>
+        <button @click="showEmployeeModal=false" class="btn-secondary flex-1">Cancel</button>
       </div>
     </div>
-    <div class="flex gap-3 mt-6">
-      <button @click="saveEmployee()" class="btn-primary flex-1">
-        <span x-text="editingEmployee ? 'Save Changes' : 'Add Barber'"></span>
-      </button>
-      <button @click="showEmployeeModal=false" class="btn-secondary flex-1">Cancel</button>
-    </div>
   </div>
-</div>
+</template>
 
 <!-- ── Service Modal ───────────────────────────────────────────────────────── -->
-<div x-show="showServiceModal" class="modal-overlay" @click.self="showServiceModal=false">
-  <div class="modal">
-    <h3 class="text-lg font-bold text-slate-800 mb-5" x-text="editingService ? 'Edit Service' : 'Add Service'"></h3>
-    <div class="space-y-4">
-      <div class="grid grid-cols-2 gap-4">
-        <div>
-          <label class="label">Emoji</label>
-          <input x-model="serviceForm.emoji" class="input text-center text-2xl" placeholder="✂️" maxlength="4">
+<template x-if="showServiceModal">
+  <div class="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"
+       @click.self="showServiceModal=false">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6"
+         x-transition:enter="transition ease-out duration-200"
+         x-transition:enter-start="opacity-0 scale-95"
+         x-transition:enter-end="opacity-100 scale-100">
+      <div class="flex items-center justify-between mb-5">
+        <h3 class="text-lg font-bold text-slate-800" x-text="editingService ? 'Edit Service' : 'Add Service'"></h3>
+        <button @click="showServiceModal=false" class="text-slate-400 hover:text-slate-600 text-xl leading-none">&times;</button>
+      </div>
+      <div class="space-y-4">
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="label">Emoji</label>
+            <input x-model="serviceForm.emoji" class="input text-center text-2xl" placeholder="✂️" maxlength="4">
+          </div>
+          <div>
+            <label class="label">Name *</label>
+            <input x-model="serviceForm.name" class="input" placeholder="Haircut">
+          </div>
         </div>
         <div>
-          <label class="label">Name *</label>
-          <input x-model="serviceForm.name" class="input" placeholder="Haircut">
+          <label class="label">Description</label>
+          <input x-model="serviceForm.description" class="input" placeholder="Short description shown to customers">
+        </div>
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="label">Duration (minutes)</label>
+            <input type="number" x-model="serviceForm.duration" class="input" min="5" step="5" placeholder="30">
+          </div>
+          <div>
+            <label class="label">Price (<span x-text="settings.currency"></span>)</label>
+            <input type="number" x-model="serviceForm.price" class="input" min="0" step="0.50" placeholder="35">
+          </div>
         </div>
       </div>
-      <div>
-        <label class="label">Description</label>
-        <input x-model="serviceForm.description" class="input" placeholder="Short description shown to customers">
+      <div class="flex gap-3 mt-6">
+        <button @click="saveService()" class="btn-primary flex-1" x-text="editingService ? 'Save Changes' : 'Add Service'"></button>
+        <button @click="showServiceModal=false" class="btn-secondary flex-1">Cancel</button>
       </div>
-      <div class="grid grid-cols-2 gap-4">
-        <div>
-          <label class="label">Duration (minutes)</label>
-          <input type="number" x-model="serviceForm.duration" class="input" min="5" step="5" placeholder="30">
-        </div>
-        <div>
-          <label class="label">Price (<span x-text="settings.currency"></span>)</label>
-          <input type="number" x-model="serviceForm.price" class="input" min="0" step="0.50" placeholder="35">
-        </div>
-      </div>
-    </div>
-    <div class="flex gap-3 mt-6">
-      <button @click="saveService()" class="btn-primary flex-1" x-text="editingService ? 'Save Changes' : 'Add Service'"></button>
-      <button @click="showServiceModal=false" class="btn-secondary flex-1">Cancel</button>
     </div>
   </div>
-</div>
+</template>
 
 <!-- ── Toast notifications ─────────────────────────────────────────────────── -->
 <div x-show="toast" x-transition class="fixed bottom-6 right-6 bg-slate-800 text-white px-5 py-3 rounded-xl shadow-xl text-sm" x-text="toast"></div>
