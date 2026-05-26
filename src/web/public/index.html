@@ -30,9 +30,7 @@
 <body class="bg-slate-100 font-sans" x-data="app()" x-cloak>
 
 <!-- ── Login Screen ───────────────────────────────────────────────────────── -->
-<div x-show="!authenticated" class="min-h-screen flex flex-col items-center justify-center gap-6 p-4">
-
-  <!-- Login card -->
+<div x-show="!authenticated" class="min-h-screen flex items-center justify-center">
   <div class="bg-white rounded-2xl shadow-xl p-10 w-full max-w-sm">
     <div class="text-center mb-8">
       <div class="text-5xl mb-3">💈</div>
@@ -46,17 +44,6 @@
       <button type="submit" class="btn-primary w-full py-2.5">Sign In</button>
     </form>
   </div>
-
-  <!-- QR card (shown pre-login when bot needs scanning) -->
-  <div x-show="waStatus.status === 'qr' && waStatus.qrDataUrl"
-       class="bg-white rounded-2xl shadow-xl p-6 w-full max-w-sm text-center">
-    <p class="text-sm font-semibold text-slate-700 mb-1">📱 Scan to connect WhatsApp</p>
-    <p class="text-xs text-slate-400 mb-4">Open WhatsApp → Linked Devices → Link a Device</p>
-    <img :src="waStatus.qrDataUrl" alt="WhatsApp QR"
-         class="w-48 h-48 mx-auto rounded-xl border border-slate-100 shadow-sm">
-    <p class="text-xs text-slate-400 mt-3 animate-pulse">Waiting for scan…</p>
-  </div>
-
 </div>
 
 <!-- ── Main App ───────────────────────────────────────────────────────────── -->
