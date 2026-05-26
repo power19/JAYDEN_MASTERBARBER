@@ -1,7 +1,8 @@
 /**
  * All data access functions — pure JavaScript, no SQL required.
  */
-const db = require('./database');
+const db              = require('./database');
+const { listEvents }  = require('../services/googleCalendar');
 
 // ── Settings ──────────────────────────────────────────────────────────────────
 
@@ -205,7 +206,7 @@ function _generateSlots(baseDate, openTime, closeTime, serviceDuration, interval
   return slots;
 }
 
-function getAvailableSlotsForEmployee(employee, date, serviceDuration) {
+async function getAvailableSlotsForEmployee(employee, date, serviceDuration) {
   const dayOfWeek = date.getDay();
   const hours     = getHoursForDay(employee.id, dayOfWeek);
   if (!hours) return [];
@@ -213,24 +214,33 @@ function getAvailableSlotsForEmployee(employee, date, serviceDuration) {
   const allSlots = _generateSlots(date, hours.open_time, hours.close_time, serviceDuration);
   const dateStr  = _dateStr(date);
 
+  // ── Local DB conflicts ────────────────────────────────────────────────────────
   const booked = db.appointments.find(a =>
     (a.start_time||'').startsWith(dateStr) &&
     String(a.employee_id) === String(employee.id) &&
     a.status !== 'cancelled'
   );
 
-  return allSlots.filter(slot =>
-    !booked.some(b => {
-      const bs = new Date(b.start_time), be = new Date(b.end_time);
-      return slot.start < be && slot.end > bs;
-    })
-  );
+  // ── Google Calendar conflicts (manual entries, blocked time, etc.) ────────────
+  // Use the employee's own calendar, or fall back to the global one from .env.
+  // If neither is configured (or both are 'primary'), skip — fail open.
+  const calId = employee.google_calendar_id ||
+    (process.env.GOOGLE_CALENDAR_ID !== 'primary' ? process.env.GOOGLE_CALENDAR_ID : null);
+  const calEvents = await listEvents(calId, dateStr);
+
+  // ── Merge and filter ──────────────────────────────────────────────────────────
+  const busy = [
+    ...booked.map(b => ({ start: new Date(b.start_time), end: new Date(b.end_time) })),
+    ...calEvents,
+  ];
+
+  return allSlots.filter(slot => !busy.some(b => slot.start < b.end && slot.end > b.start));
 }
 
-function getAvailableSlotsForAny(employees, date, serviceDuration) {
+async function getAvailableSlotsForAny(employees, date, serviceDuration) {
   const map = new Map();
   for (const emp of employees) {
-    for (const slot of getAvailableSlotsForEmployee(emp, date, serviceDuration)) {
+    for (const slot of await getAvailableSlotsForEmployee(emp, date, serviceDuration)) {
       if (map.has(slot.time)) {
         map.get(slot.time).availableEmployees.push(emp.id);
       } else {

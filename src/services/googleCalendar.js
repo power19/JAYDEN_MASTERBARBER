@@ -84,4 +84,48 @@ async function createAppointment({ service, startTime, endTime, customerName, bo
   }
 }
 
-module.exports = { createAppointment };
+/**
+ * Fetch busy periods from a Google Calendar for a given date.
+ *
+ * Returns an array of { start: Date, end: Date, title: string }.
+ * Returns [] on any error so a Calendar outage never blocks bookings.
+ *
+ * All-day events are intentionally ignored — they typically represent
+ * holidays or reminders, not time-specific appointments.
+ *
+ * @param {string} calendarId   - The calendar to query
+ * @param {string} dateStr      - 'YYYY-MM-DD'
+ */
+async function listEvents(calendarId, dateStr) {
+  // Skip if no specific calendar is configured
+  if (!calendarId || calendarId === 'primary') return [];
+
+  try {
+    const cal = await _getCalendar();
+
+    // Fetch the full UTC day — covers all business hours for UTC±12 timezones
+    const timeMin = `${dateStr}T00:00:00Z`;
+    const timeMax = `${dateStr}T23:59:59Z`;
+
+    const res = await cal.events.list({
+      calendarId,
+      timeMin,
+      timeMax,
+      singleEvents: true,
+      orderBy:      'startTime',
+    });
+
+    return (res.data.items || [])
+      .filter(e => e.start?.dateTime)           // skip all-day events
+      .map(e => ({
+        start: new Date(e.start.dateTime),
+        end:   new Date(e.end.dateTime),
+        title: e.summary || '(blocked)',
+      }));
+  } catch (err) {
+    console.error(`⚠️  Google Calendar read error for ${calendarId}:`, err.message);
+    return [];  // fail open — don't prevent bookings if Calendar is unreachable
+  }
+}
+
+module.exports = { createAppointment, listEvents };

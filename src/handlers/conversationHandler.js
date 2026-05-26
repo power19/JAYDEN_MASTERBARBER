@@ -185,9 +185,9 @@ async function onDate(userId, text, session) {
   let freeSlots;
 
   if (session.isAnyEmployee) {
-    freeSlots = q.getAvailableSlotsForAny(employees, selectedDate.date, service.duration);
+    freeSlots = await q.getAvailableSlotsForAny(employees, selectedDate.date, service.duration);
   } else {
-    freeSlots = q.getAvailableSlotsForEmployee(session.selectedEmployee, selectedDate.date, service.duration);
+    freeSlots = await q.getAvailableSlotsForEmployee(session.selectedEmployee, selectedDate.date, service.duration);
   }
 
   if (freeSlots.length === 0) {
