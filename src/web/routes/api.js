@@ -46,13 +46,18 @@ router.get('/settings-public', (req, res) => {
   res.json({ shop_name: q.getSetting('shop_name') || "Jayden's Barbershop" });
 });
 
-/** Validate barber PIN — grants a scan session (separate from admin auth). */
+/** Validate barber PIN — matches against individual employee scan_pin fields. */
 router.post('/scan/auth', (req, res) => {
   const { pin } = req.body;
-  const correctPin = q.getSetting('barber_scan_pin') || '1234';
-  if (String(pin) === String(correctPin)) {
+  if (!pin) return res.status(400).json({ ok: false, error: 'PIN required' });
+
+  // Find the employee whose PIN matches
+  const employee = q.getActiveEmployees().find(e => e.scan_pin && String(e.scan_pin) === String(pin));
+  if (employee) {
     req.session.barberAuthenticated = true;
-    res.json({ ok: true });
+    req.session.barberEmployeeId   = employee.id;
+    req.session.barberEmployeeName = employee.name;
+    res.json({ ok: true, name: employee.name });
   } else {
     res.status(401).json({ ok: false, error: 'Wrong PIN' });
   }
@@ -71,8 +76,9 @@ router.post('/scan/checkin/:code', (req, res) => {
     if (appt.status === 'completed') return res.json({ ok: false, already: true, message: 'Already checked in', customer_name: appt.customer_name, service_name: appt.service_name, service_emoji: appt.service_emoji || '✂️', employee_name: appt.employee_name || '—' });
 
     q.updateAppointment(appt.id, { status: 'completed' });
-    const employee = appt.employee_id ? q.getEmployee(appt.employee_id) : null;
-    console.log(`✅ Check-in (barber scan): ${appt.customer_name} — ${appt.booking_code}`);
+    const employee    = appt.employee_id ? q.getEmployee(appt.employee_id) : null;
+    const scannedBy   = req.session.barberEmployeeName || 'Admin';
+    console.log(`✅ Check-in by ${scannedBy}: ${appt.customer_name} — ${appt.booking_code}`);
     res.json({
       ok:            true,
       customer_name: appt.customer_name,

@@ -1621,6 +1621,11 @@
           <p class="text-xs text-slate-400 mt-1">Events for this barber will sync to this calendar.</p>
         </div>
         <div>
+          <label class="label">Scanner PIN <span class="normal-case font-normal text-slate-400">— for the /scan check-in page</span></label>
+          <input type="text" x-model="employeeForm.scan_pin" class="input w-32 font-mono text-center tracking-widest" placeholder="e.g. 5678" maxlength="8">
+          <p class="text-xs text-slate-400 mt-1">Each barber uses their own PIN to unlock the QR scanner. Leave empty to disable scanner access for this barber.</p>
+        </div>
+        <div>
           <label class="label">Services <span class="normal-case font-normal text-slate-400">— uncheck what this barber cannot do</span></label>
           <div class="mt-2 space-y-2 max-h-48 overflow-y-auto pr-1">
             <template x-for="s in services.filter(s=>s.is_active)" :key="s.id">
@@ -2005,8 +2010,8 @@ function app() {
       this.editingEmployee = emp;
       // excluded_service_ids = services this barber CANNOT do (empty = can do everything)
       this.employeeForm = emp
-        ? { name: emp.name, phone: emp.phone, color: emp.color, google_calendar_id: emp.google_calendar_id, excluded_service_ids: emp.excluded_service_ids || [] }
-        : { name: '', phone: '', color: '#f59e0b', google_calendar_id: '', excluded_service_ids: [] };
+        ? { name: emp.name, phone: emp.phone, color: emp.color, google_calendar_id: emp.google_calendar_id, excluded_service_ids: emp.excluded_service_ids || [], scan_pin: emp.scan_pin || '' }
+        : { name: '', phone: '', color: '#f59e0b', google_calendar_id: '', excluded_service_ids: [], scan_pin: '' };
       this.showEmployeeModal = true;
     },
 

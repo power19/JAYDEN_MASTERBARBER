@@ -118,7 +118,10 @@
   <!-- ── Scanner Screen ────────────────────────────────────── -->
   <div id="scan-screen">
     <div class="scan-header">
-      <div class="scan-title">📷 Scan QR Code</div>
+      <div>
+        <div class="scan-title">📷 Scan QR Code</div>
+        <div id="barber-name-label" style="font-size:12px;color:#64748b;margin-top:2px"></div>
+      </div>
       <button class="lock-btn" onclick="lockScanner()">🔒 Lock</button>
     </div>
     <div id="qr-reader"></div>
@@ -170,6 +173,7 @@
     });
     const data = await res.json();
     if (data.ok) {
+      if (data.name) document.getElementById('barber-name-label').textContent = '✂️ ' + data.name;
       showScanner();
     } else {
       document.getElementById('pin-error').textContent = '❌ Wrong PIN — try again';

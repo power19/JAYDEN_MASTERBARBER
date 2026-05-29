@@ -17,9 +17,9 @@ const getEmployees       = ()    => db.employees.find().sort((a,b) => a.id - b.i
 const getActiveEmployees = ()    => db.employees.find(e => e.is_active).sort((a,b) => a.id - b.id);
 const getEmployee        = id    => db.employees.findOne(e => String(e.id) === String(id));
 const createEmployee     = (name, phone, color, gcalId, excludedServiceIds) =>
-  db.employees.insert({ name, phone: phone||'', color: color||'#f59e0b', google_calendar_id: gcalId||'', is_active: 1, excluded_service_ids: excludedServiceIds||[] });
+  db.employees.insert({ name, phone: phone||'', color: color||'#f59e0b', google_calendar_id: gcalId||'', is_active: 1, excluded_service_ids: excludedServiceIds||[], scan_pin: '' });
 const updateEmployee     = (id, data) =>
-  db.employees.updateById(id, { name: data.name, phone: data.phone||'', color: data.color, google_calendar_id: data.google_calendar_id||'', excluded_service_ids: data.excluded_service_ids||[] });
+  db.employees.updateById(id, { name: data.name, phone: data.phone||'', color: data.color, google_calendar_id: data.google_calendar_id||'', excluded_service_ids: data.excluded_service_ids||[], scan_pin: data.scan_pin||'' });
 
 /** Returns active employees who can perform the given service.
  *  Uses excluded_service_ids — if the service is NOT in the exclusion list, the employee can do it.
