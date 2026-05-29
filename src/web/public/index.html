@@ -363,6 +363,10 @@
                         target="_blank"
                         title="View in Google Calendar"
                         class="text-emerald-500 hover:text-emerald-600 transition text-lg leading-none">✅</a>
+                      <!-- QR Check-In button -->
+                      <button @click="showQR(a)"
+                        title="Show Check-In QR Code"
+                        class="text-slate-400 hover:text-blue-500 transition text-lg leading-none">🔲</button>
                     </div>
                   </td>
                 </tr>
@@ -372,6 +376,30 @@
         </div>
       </div>
     </div>
+
+    <!-- ── QR CHECK-IN MODAL ──────────────────────────────────────── -->
+    <template x-if="showQRModal">
+      <div class="fixed inset-0 z-50 flex items-center justify-center p-4" style="background:rgba(0,0,0,0.5)"
+           @click.self="showQRModal=false">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 text-center">
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="text-lg font-bold text-slate-800">🔲 Check-In QR</h3>
+            <button @click="showQRModal=false" class="text-slate-400 hover:text-slate-600 text-xl">&times;</button>
+          </div>
+          <div x-show="qrLoading" class="py-12 text-slate-400">Generating QR…</div>
+          <div x-show="!qrLoading && qrData">
+            <img :src="qrData.dataUrl" alt="QR Code" class="mx-auto rounded-xl mb-4" style="width:200px;height:200px">
+            <p class="text-sm font-medium text-slate-700 mb-1" x-text="qrAppt?.customer_name"></p>
+            <p class="text-xs text-slate-500 mb-3" x-text="(qrAppt?.service_emoji || '') + ' ' + (qrAppt?.service_name || '')"></p>
+            <div class="bg-slate-100 rounded-xl px-4 py-2 font-mono text-sm text-slate-600 mb-4" x-text="'#' + (qrAppt?.booking_code || '')"></div>
+            <div x-show="!settings.shop_url" class="text-xs text-amber-600 bg-amber-50 rounded-lg p-2 mb-3">
+              ⚠️ Set your <strong>Shop URL</strong> in Settings → Integrations for fully functional QR scanning.
+            </div>
+            <a :href="qrData.checkUrl" target="_blank" class="text-xs text-blue-500 underline break-all" x-text="qrData.checkUrl"></a>
+          </div>
+        </div>
+      </div>
+    </template>
 
     <!-- ── NEW APPOINTMENT MODAL ───────────────────────────────────── -->
     <template x-if="showNewApptModal">
@@ -1459,6 +1487,17 @@
             </span>
           </div>
           <p class="text-xs text-slate-400">Appointments appear automatically in this calendar. Manual busy blocks are also respected for availability.</p>
+          <div class="bg-blue-50 border border-blue-200 rounded-xl p-4 space-y-3">
+            <h4 class="text-sm font-semibold text-blue-800">🔲 QR Check-In URL</h4>
+            <div>
+              <label class="label">Public Shop URL</label>
+              <input x-model="settings.shop_url" class="input font-mono text-xs" placeholder="https://your-ngrok-or-domain.com">
+              <p class="text-xs text-slate-400 mt-1">Used to generate QR check-in links. Set to your ngrok URL or VPS domain. <span class="text-amber-600 font-medium">Update this whenever your ngrok URL changes.</span></p>
+            </div>
+            <div x-show="settings.shop_url" class="text-xs text-blue-700 break-all">
+              Example link: <span class="font-mono" x-text="(settings.shop_url || '').replace(/\/$/, '') + '/api/checkin/AB3K'"></span>
+            </div>
+          </div>
           <div>
             <label class="label">Calendar ID</label>
             <input x-model="settings.google_calendar_id" class="input font-mono text-xs"
@@ -1677,6 +1716,12 @@ function app() {
     calendarTestName:   '',
     calendarTestTz:     '',
     calendarTestError:  '',
+
+    // QR Check-In modal
+    showQRModal: false,
+    qrLoading:   false,
+    qrData:      null,
+    qrAppt:      null,
 
     // Settings tabs
     settingsTab: 'shop',
@@ -2126,6 +2171,20 @@ function app() {
     async removePhone(id, phone) {
       await this.api('DELETE', `/api/customers/${id}/phones/${phone}`);
       this.customers = await this.api('GET', '/api/customers');
+    },
+
+    async showQR(appt) {
+      this.qrAppt    = appt;
+      this.qrData    = null;
+      this.qrLoading = true;
+      this.showQRModal = true;
+      try {
+        this.qrData = await this.api('GET', `/api/appointments/${appt.id}/qr`);
+      } catch (e) {
+        this.showToast('❌ Failed to generate QR');
+        this.showQRModal = false;
+      }
+      this.qrLoading = false;
     },
 
     async releaseChat(chatId) {

@@ -39,6 +39,86 @@ router.get('/auth/status', (req, res) => {
   res.json({ authenticated: !!req.session?.authenticated });
 });
 
+// ── QR Check-In (public — no auth, accessed by barber scanning customer's QR) ──
+
+const QRCode = require('qrcode');
+
+router.get('/checkin/:code', (req, res) => {
+  const shop = q.getSetting('shop_name') || "Jayden's Barbershop";
+
+  function page(icon, title, subtitle, detailHtml, color) {
+    return `<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${title} — ${shop}</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:#f8fafc;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px}
+  .card{background:#fff;border-radius:24px;padding:40px 28px;max-width:380px;width:100%;text-align:center;box-shadow:0 8px 40px rgba(0,0,0,.10)}
+  .icon{font-size:64px;line-height:1;margin-bottom:16px}
+  .title{font-size:22px;font-weight:800;color:#0f172a;margin-bottom:6px}
+  .sub{font-size:14px;color:#64748b;margin-bottom:24px}
+  .detail{background:#f1f5f9;border-radius:14px;padding:16px 18px;text-align:left;font-size:14px;line-height:2;color:#374151}
+  .detail strong{color:#0f172a}
+  .badge{display:inline-block;background:${color};color:#fff;font-weight:700;border-radius:99px;padding:5px 18px;font-size:13px;margin-top:22px}
+</style>
+</head><body>
+  <div class="card">
+    <div class="icon">${icon}</div>
+    <div class="title">${title}</div>
+    <div class="sub">${subtitle}</div>
+    ${detailHtml}
+    <div class="badge">💈 ${shop}</div>
+  </div>
+</body></html>`;
+  }
+
+  function apptDetail(a) {
+    const emp  = a.employee_id ? q.getEmployee(a.employee_id) : null;
+    const date = new Date(a.start_time).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+    const time = new Date(a.start_time).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+    return `<div class="detail">
+      <strong>👤</strong> ${a.customer_name}<br>
+      <strong>✂️</strong> ${a.service_emoji || ''} ${a.service_name}<br>
+      <strong>💈</strong> ${emp?.name || a.employee_name || '—'}<br>
+      <strong>📅</strong> ${date} &nbsp;<strong>⏰</strong> ${time}<br>
+      <strong>🎫</strong> ${a.booking_code}
+    </div>`;
+  }
+
+  const appt = q.getAppointmentByCode(req.params.code);
+
+  if (!appt)
+    return res.status(404).send(page('❓', 'Code Not Found', 'This booking code does not exist.', '', '#ef4444'));
+  if (appt.status === 'cancelled')
+    return res.send(page('🚫', 'Appointment Cancelled', 'This appointment was cancelled.', apptDetail(appt), '#ef4444'));
+  if (appt.status === 'completed')
+    return res.send(page('✅', 'Already Checked In', 'This appointment was already marked as complete.', apptDetail(appt), '#10b981'));
+  if (appt.status === 'no-show')
+    return res.send(page('👻', 'Marked No-Show', 'This appointment was recorded as a no-show.', apptDetail(appt), '#f59e0b'));
+
+  // Mark as completed
+  q.updateAppointment(appt.id, { status: 'completed' });
+  console.log(`✅ Check-in: ${appt.customer_name} — ${appt.booking_code}`);
+  return res.send(page('✅', 'Checked In!', `Welcome, ${appt.customer_name}! See you inside. 💈`, apptDetail(appt), '#10b981'));
+});
+
+/** Returns a QR code PNG (base64) for an appointment's check-in URL. */
+router.get('/appointments/:id/qr', async (req, res) => {
+  try {
+    const appts = q.getAppointments({});
+    const appt  = appts.find(a => String(a.id) === String(req.params.id));
+    if (!appt) return res.status(404).json({ error: 'Not found' });
+
+    const shopUrl  = (q.getSetting('shop_url') || '').replace(/\/$/, '');
+    const checkUrl = shopUrl
+      ? `${shopUrl}/api/checkin/${appt.booking_code}`
+      : appt.booking_code; // fallback to just the code if URL not configured
+
+    const dataUrl = await QRCode.toDataURL(checkUrl, { width: 300, margin: 2, color: { dark: '#0f172a', light: '#ffffff' } });
+    res.json({ ok: true, dataUrl, checkUrl, booking_code: appt.booking_code });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── WhatsApp status (no auth — needed to show QR before login) ───────────────
 // Returns connection status and QR data URL when available.
 // The QR image itself is safe to expose publicly — it's a one-time-use code

@@ -83,6 +83,7 @@ function seedIfEmpty() {
     currency:             process.env.CURRENCY         || 'SRD',
     timezone:             process.env.TIMEZONE         || 'America/Paramaribo',
     google_calendar_id:   process.env.GOOGLE_CALENDAR_ID !== 'primary' ? (process.env.GOOGLE_CALENDAR_ID || '') : '',
+    shop_url:             process.env.SHOP_URL || '',   // public URL used in QR check-in links
     booking_days_ahead:   process.env.BOOKING_DAYS_AHEAD || '20',
     reminder_enabled:     '0',
     reminder_hours:       '24',
