@@ -646,7 +646,7 @@ async function onConfirm(userId, text, session) {
         const base64  = qrDataUrl.split(',')[1];
         const media   = new MessageMedia('image/png', base64, `checkin-${booking.code}.png`);
         const caption = `🔲 *Check-in code: ${booking.code}*\n_Show this to your barber when you arrive. They will scan it to confirm your visit._`;
-        await wClient.sendMessage(`${customerPhone}@c.us`, media, { caption });
+        await wClient.sendMessage(userId, media, { caption });
       }
     }
   } catch (e) {

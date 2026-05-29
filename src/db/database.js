@@ -91,6 +91,8 @@ function seedIfEmpty() {
     survey_delay_minutes: '30',
     new_customer_employee_id: '', // barber ID who handles all new customers
     barber_scan_pin:          '1234', // PIN for the barber-only QR scanner page
+    checkin_window_enabled:   '0',   // 0 = open (any time), 1 = restricted to time window
+    checkin_window_minutes:   '60',  // minutes before/after appointment start allowed for check-in
     takeover_keyword:     '#human',
     release_keyword:      '#bot',
     cs_phone_1:           '',

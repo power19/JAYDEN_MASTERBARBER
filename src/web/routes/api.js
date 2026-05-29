@@ -75,6 +75,20 @@ router.post('/scan/checkin/:code', (req, res) => {
     if (appt.status === 'no-show')   return res.json({ ok: false, message: 'Marked as no-show' });
     if (appt.status === 'completed') return res.json({ ok: false, already: true, message: 'Already checked in', customer_name: appt.customer_name, service_name: appt.service_name, service_emoji: appt.service_emoji || '✂️', employee_name: appt.employee_name || '—' });
 
+    // Optional time-window check
+    if (q.getSetting('checkin_window_enabled') === '1') {
+      const windowMin  = parseInt(q.getSetting('checkin_window_minutes'), 10) || 60;
+      const apptTime   = new Date(appt.start_time).getTime();
+      const now        = Date.now();
+      const diffMin    = (now - apptTime) / 60000; // negative = before appt, positive = after
+      if (diffMin < -windowMin || diffMin > windowMin) {
+        const when = diffMin < 0
+          ? `opens in ${Math.round(-diffMin)} min`
+          : `expired ${Math.round(diffMin)} min ago`;
+        return res.json({ ok: false, message: `Check-in window not open (${when}). Window: ±${windowMin} min.` });
+      }
+    }
+
     q.updateAppointment(appt.id, { status: 'completed' });
     const employee    = appt.employee_id ? q.getEmployee(appt.employee_id) : null;
     const scannedBy   = req.session.barberEmployeeName || 'Admin';

@@ -1484,6 +1484,30 @@
           </div>
         </div>
 
+        <!-- Check-In Window -->
+        <div class="card space-y-4">
+          <div class="flex items-center justify-between">
+            <div>
+              <h3 class="font-bold text-slate-700">🕐 Check-In Time Window</h3>
+              <p class="text-xs text-slate-400 mt-0.5">Restrict QR check-in to a window around the appointment time. When off, check-in works at any time.</p>
+            </div>
+            <button @click="settings.checkin_window_enabled = settings.checkin_window_enabled === '1' ? '0' : '1'"
+              :class="settings.checkin_window_enabled === '1' ? 'bg-amber-500' : 'bg-slate-300'"
+              class="relative inline-flex h-6 w-11 rounded-full transition-colors flex-shrink-0">
+              <span :class="settings.checkin_window_enabled === '1' ? 'translate-x-6' : 'translate-x-1'"
+                class="inline-block h-4 w-4 rounded-full bg-white shadow mt-1 transition-transform"></span>
+            </button>
+          </div>
+          <div x-show="settings.checkin_window_enabled === '1'" class="space-y-2">
+            <label class="label">Allow check-in within</label>
+            <div class="flex items-center gap-3">
+              <input type="number" x-model="settings.checkin_window_minutes" class="input w-24" min="5" max="1440" placeholder="60">
+              <span class="text-sm text-slate-500">minutes of appointment time</span>
+            </div>
+            <p class="text-xs text-slate-400">E.g. 60 = can scan from 1 hour before until 1 hour after the appointment starts.</p>
+          </div>
+        </div>
+
         <!-- Barber Scan PIN -->
         <div class="card space-y-4">
           <h3 class="font-bold text-slate-700">🔐 Barber Scanner PIN</h3>
