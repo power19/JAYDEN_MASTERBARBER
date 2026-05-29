@@ -189,12 +189,16 @@
     startCamera();
   }
 
-  function lockScanner() {
-    if (scanner) { scanner.stop().catch(() => {}); scanner = null; }
+  async function lockScanner() {
     scanning = false;
-    document.getElementById('scan-screen').style.display  = 'none';
-    document.getElementById('pin-screen').style.display   = 'block';
-    pin = ''; updateDots();
+    if (scanner) {
+      try { await scanner.stop(); } catch (e) {}
+      scanner = null;
+    }
+    document.getElementById('scan-screen').style.display = 'none';
+    document.getElementById('pin-screen').style.display  = 'block';
+    pin = '';
+    updateDots();
   }
 
   async function startCamera() {

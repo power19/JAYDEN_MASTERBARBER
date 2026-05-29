@@ -46,18 +46,13 @@ router.get('/settings-public', (req, res) => {
   res.json({ shop_name: q.getSetting('shop_name') || "Jayden's Barbershop" });
 });
 
-/** Validate barber PIN — matches against individual employee scan_pin fields. */
+/** Validate shop scanner PIN — single PIN configured in Settings → Rules. */
 router.post('/scan/auth', (req, res) => {
-  const { pin } = req.body;
-  if (!pin) return res.status(400).json({ ok: false, error: 'PIN required' });
-
-  // Find the employee whose PIN matches
-  const employee = q.getActiveEmployees().find(e => e.scan_pin && String(e.scan_pin) === String(pin));
-  if (employee) {
+  const { pin }      = req.body;
+  const correctPin   = q.getSetting('barber_scan_pin') || '1234';
+  if (String(pin) === String(correctPin)) {
     req.session.barberAuthenticated = true;
-    req.session.barberEmployeeId   = employee.id;
-    req.session.barberEmployeeName = employee.name;
-    res.json({ ok: true, name: employee.name });
+    res.json({ ok: true });
   } else {
     res.status(401).json({ ok: false, error: 'Wrong PIN' });
   }
