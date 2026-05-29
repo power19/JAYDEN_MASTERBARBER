@@ -271,11 +271,21 @@ async function onService(userId, text, session) {
     return `${t(lang, 'invalid_choice', { max: pageCount })}\n\n${buildServiceMenu(lang, true, page)}`;
   }
 
-  const service   = services[actualIdx];
-  const employees = q.getEmployeesForService(service.id);
+  const service = services[actualIdx];
+  let employees = q.getEmployeesForService(service.id);
 
   if (employees.length === 0) {
     return t(lang, 'no_barbers_service', { service: service.name });
+  }
+
+  // New customer logic — route to the designated barber if configured
+  if (session.isNewCustomer) {
+    const newCustEmpId = q.getSetting('new_customer_employee_id');
+    if (newCustEmpId) {
+      const dedicated = employees.filter(e => String(e.id) === String(newCustEmpId));
+      // Only restrict if that barber actually offers this service; otherwise fall back to all
+      if (dedicated.length > 0) employees = dedicated;
+    }
   }
 
   // Ask how many people — barber selection skipped, fair auto-assign at confirmation
@@ -380,7 +390,7 @@ async function onDate(userId, text, session) {
     return `${t(lang, 'invalid_choice', { max: pageCount })}\n\n${buildDateMenu(lang, dates, session.selectedService, page)}`;
   }
 
-  const selectedDate = dates[idx];
+  const selectedDate = dates[actualIdx];
   const service      = session.selectedService;
   const employees    = session.employees || q.getActiveEmployees();
   const groupSize    = session.groupSize || 1;
@@ -620,12 +630,13 @@ async function onConfirm(userId, text, session) {
   q.getOrCreateCustomer(userName, customerPhone);
 
   // ── CS / notification number forwarding ──────────────────────────────────
-  const isNewCust = session.isNewCustomer;
-  const allCodes  = [...mainBookings, ...overflowBookings].map(b => b.code).join(', ');
+  const isNewCust     = session.isNewCustomer;
+  const allCodes      = [...mainBookings, ...overflowBookings].map(b => b.code).join(', ');
   const firstBarber  = mainBookings[0]?.barber?.name || '—';
   const csLines = [
-    isNewCust ? `🆕 *First-Time Customer!*\n` : null,
-    `📋 *New Booking Confirmed*`,
+    isNewCust
+      ? `🆕 *NEW CUSTOMER — First-Time Visit!*\n⚡ Assigned to ${firstBarber} as per new-customer policy.\n`
+      : `📋 *New Booking Confirmed*`,
     ``,
     `👤 ${userName}`,
     `📱 ${customerPhone}`,
@@ -999,7 +1010,7 @@ function buildServiceList(lang) {
 
 function buildGroupSizeMenu(lang, service, maxBarbers) {
   // Allow up to 2× barbers (overflow), hard cap at 4
-  const maxAllowed = Math.min(maxBarbers * 2, 6);
+  const maxAllowed = Math.min(maxBarbers * 2, 4);
   const lines = [];
   for (let i = 1; i <= maxAllowed; i++) {
     let label = i === 1

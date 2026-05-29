@@ -395,6 +395,45 @@ function addBlock(data) {
 
 const deleteBlock = (id) => db.blockedDates.removeById(id);
 
+// ── Employee Leave ────────────────────────────────────────────────────────────
+
+/**
+ * Returns leave records, optionally filtered by employeeId and/or month ('YYYY-MM').
+ */
+function getLeaves({ employeeId, month } = {}) {
+  let results = db.leaves.find();
+  if (employeeId != null && employeeId !== '')
+    results = results.filter(l => String(l.employee_id) === String(employeeId));
+  if (month)
+    results = results.filter(l => l.start_date.startsWith(month) || l.end_date.startsWith(month) ||
+      (l.start_date < month + '-01' && l.end_date >= month + '-01'));
+  return results.sort((a, b) => a.start_date.localeCompare(b.start_date));
+}
+
+function addLeave({ employeeId, startDate, endDate, reason, googleEventId }) {
+  return db.leaves.insert({
+    employee_id:      parseInt(employeeId, 10),
+    start_date:       startDate,
+    end_date:         endDate || startDate,
+    reason:           reason || '',
+    google_event_id:  googleEventId || '',
+  });
+}
+
+const getLeave    = (id) => db.leaves.findOne(l => String(l.id) === String(id));
+const deleteLeave = (id) => db.leaves.removeById(id);
+
+/**
+ * Returns true if the given employee is on approved leave for dateStr ('YYYY-MM-DD').
+ */
+function isEmployeeOnLeave(employeeId, dateStr) {
+  return !!db.leaves.findOne(l =>
+    String(l.employee_id) === String(employeeId) &&
+    l.start_date <= dateStr &&
+    l.end_date   >= dateStr
+  );
+}
+
 // ── Slot generation ───────────────────────────────────────────────────────────
 
 function _generateSlots(baseDate, openTime, closeTime, serviceDuration, interval = 30) {
@@ -423,6 +462,10 @@ async function getAvailableSlotsForEmployee(employee, date, serviceDuration, { e
   const dayOfWeek = date.getDay();
   const hours     = getHoursForDay(employee.id, dayOfWeek);
   if (!hours) return [];
+
+  // Employee on approved leave → no slots
+  const dateStr0 = _dateStr(date);
+  if (isEmployeeOnLeave(employee.id, dateStr0)) return [];
 
   const allSlots = _generateSlots(date, hours.open_time, hours.close_time, serviceDuration);
   const dateStr  = _dateStr(date);
@@ -572,12 +615,13 @@ function getAvailableDates(employees, daysAhead, limit = 20) {
     if (db.blockedDates.findOne(b => b.date === dateStr && b.employee_id === null && b.all_day))
       continue;
 
-    // At least one employee must have open hours AND not be blocked all day
+    // At least one employee must have open hours AND not be blocked/on-leave all day
     const anyOpen = employees.length === 0
       ? !!getHoursForDay(null, dow)
       : employees.some(e =>
           !!getHoursForDay(e.id, dow) &&
-          !db.blockedDates.findOne(b => b.date === dateStr && String(b.employee_id) === String(e.id) && b.all_day)
+          !db.blockedDates.findOne(b => b.date === dateStr && String(b.employee_id) === String(e.id) && b.all_day) &&
+          !isEmployeeOnLeave(e.id, dateStr)
         );
     if (anyOpen) {
       dates.push({
@@ -588,6 +632,115 @@ function getAvailableDates(employees, daysAhead, limit = 20) {
     }
   }
   return dates;
+}
+
+// ── Surinamese Public Holidays ────────────────────────────────────────────────
+
+/** Gregorian Easter algorithm — returns a Date object. */
+function _easterDate(year) {
+  const a = year % 19, b = Math.floor(year / 100), c = year % 100;
+  const d = Math.floor(b / 4), e = b % 4, f = Math.floor((b + 8) / 25);
+  const g = Math.floor((b - f + 1) / 3);
+  const h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4), k = c % 4;
+  const l = (32 + 2 * e + 2 * i - h - k) % 7;
+  const m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const month = Math.floor((h + l - 7 * m + 114) / 31);
+  const day   = ((h + l - 7 * m + 114) % 31) + 1;
+  return new Date(year, month - 1, day);
+}
+
+function _addDays(date, n) {
+  const d = new Date(date);
+  d.setDate(d.getDate() + n);
+  return d;
+}
+
+/**
+ * Variable Islamic/Hindu holidays per year (approximate — based on official announcements).
+ * Dates may shift by ±1 day depending on moon sighting.
+ * Extend this table when new years approach.
+ */
+const VARIABLE_HOLIDAYS = {
+  2024: [
+    { date: '2024-03-25', name: 'Holi Phagwa' },
+    { date: '2024-04-10', name: 'Eid al-Fitr (Id ul Fitr)' },
+    { date: '2024-06-17', name: 'Eid al-Adha (Id ul Adha)' },
+    { date: '2024-10-31', name: 'Divali (Deepavali)' },
+  ],
+  2025: [
+    { date: '2025-03-14', name: 'Holi Phagwa' },
+    { date: '2025-03-31', name: 'Eid al-Fitr (Id ul Fitr)' },
+    { date: '2025-06-07', name: 'Eid al-Adha (Id ul Adha)' },
+    { date: '2025-10-20', name: 'Divali (Deepavali)' },
+  ],
+  2026: [
+    { date: '2026-03-03', name: 'Holi Phagwa' },
+    { date: '2026-03-20', name: 'Eid al-Fitr (Id ul Fitr)' },
+    { date: '2026-05-27', name: 'Eid al-Adha (Id ul Adha)' },
+    { date: '2026-11-08', name: 'Divali (Deepavali)' },
+  ],
+  2027: [
+    { date: '2027-03-22', name: 'Holi Phagwa' },
+    { date: '2027-03-09', name: 'Eid al-Fitr (Id ul Fitr)' },
+    { date: '2027-05-17', name: 'Eid al-Adha (Id ul Adha)' },
+    { date: '2027-10-28', name: 'Divali (Deepavali)' },
+  ],
+  2028: [
+    { date: '2028-03-11', name: 'Holi Phagwa' },
+    { date: '2028-02-26', name: 'Eid al-Fitr (Id ul Fitr)' },
+    { date: '2028-05-05', name: 'Eid al-Adha (Id ul Adha)' },
+    { date: '2028-10-16', name: 'Divali (Deepavali)' },
+  ],
+};
+
+/**
+ * Returns the full list of Surinamese public holidays for a given year.
+ * Fixed holidays + Easter (calculated) + Islamic/Hindu (lookup table).
+ */
+function getSurinameseHolidays(year) {
+  const y = parseInt(year, 10);
+  const holidays = [
+    { date: `${y}-01-01`, name: 'Nieuwjaarsdag (New Year\'s Day)' },
+    { date: `${y}-01-06`, name: 'Driekoningen (Three Kings\' Day)' },
+    { date: `${y}-05-01`, name: 'Dag van de Arbeid (Labour Day)' },
+    { date: `${y}-07-01`, name: 'Keti Koti (Emancipation Day)' },
+    { date: `${y}-11-25`, name: 'Onafhankelijkheidsdag (Independence Day)' },
+    { date: `${y}-12-25`, name: 'Eerste Kerstdag (Christmas Day)' },
+    { date: `${y}-12-26`, name: 'Tweede Kerstdag (Boxing Day)' },
+  ];
+
+  // Easter & related
+  const easter = _easterDate(y);
+  holidays.push({ date: _dateStr(_addDays(easter, -2)), name: 'Goede Vrijdag (Good Friday)' });
+  holidays.push({ date: _dateStr(easter),               name: 'Eerste Paasdag (Easter Sunday)' });
+  holidays.push({ date: _dateStr(_addDays(easter,  1)), name: 'Tweede Paasdag (Easter Monday)' });
+
+  // Variable (Islamic / Hindu)
+  const variable = VARIABLE_HOLIDAYS[y] || [];
+  holidays.push(...variable);
+
+  return holidays.sort((a, b) => a.date.localeCompare(b.date));
+}
+
+/**
+ * Insert Surinamese holidays for a given year into blockedDates (shop-wide, all-day).
+ * Skips duplicates. Returns counts.
+ */
+function syncSurinameseHolidays(year) {
+  const holidays = getSurinameseHolidays(year);
+  let added = 0;
+  for (const h of holidays) {
+    const reason = `🇸🇷 ${h.name}`;
+    const exists = db.blockedDates.findOne(b =>
+      b.date === h.date && b.employee_id === null && b.all_day === 1 && b.reason === reason
+    );
+    if (!exists) {
+      db.blockedDates.insert({ date: h.date, employee_id: null, all_day: 1, start_time: null, end_time: null, reason });
+      added++;
+    }
+  }
+  return { added, total: holidays.length };
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -613,6 +766,8 @@ module.exports = {
   getUnsurveyedAppointments, markSurveySent, saveRating, getNoShowCount,
   getAvailableSlotsForEmployee, getAvailableSlotsForAny, getAvailableSlotsForGroup, pickLeastBusyEmployee, getAvailableDates,
   getBlocks, addBlock, deleteBlock,
+  getSurinameseHolidays, syncSurinameseHolidays,
+  getLeaves, getLeave, addLeave, deleteLeave, isEmployeeOnLeave,
   getCustomerByPhone, getAllCustomers, getAllCustomersWithStats,
   getOrCreateCustomer, addPhoneToCustomer, removePhoneFromCustomer,
   blockCustomer, unblockCustomer, updateCustomer, isPhoneBlocked,

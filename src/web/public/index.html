@@ -66,6 +66,7 @@
       <button @click="nav('appointments')" :class="page==='appointments' ? 'active' : ''" class="sidebar-link w-full text-left">📅 Appointments</button>
       <button @click="nav('employees')"   :class="page==='employees'   ? 'active' : ''" class="sidebar-link w-full text-left">👥 Employees</button>
       <button @click="nav('hours')"       :class="page==='hours'       ? 'active' : ''" class="sidebar-link w-full text-left">⏰ Work Hours</button>
+      <button @click="nav('leave')"        :class="page==='leave'        ? 'active' : ''" class="sidebar-link w-full text-left">🏖️ Employee Leave</button>
       <button @click="nav('blocks')"      :class="page==='blocks'      ? 'active' : ''" class="sidebar-link w-full text-left">🚫 Closed Dates</button>
       <button @click="nav('services')"    :class="page==='services'    ? 'active' : ''" class="sidebar-link w-full text-left">✂️ Services</button>
       <button @click="nav('customers')"   :class="page==='customers'   ? 'active' : ''" class="sidebar-link w-full text-left">👤 Customers</button>
@@ -824,9 +825,155 @@
       </div>
     </div>
 
+    <!-- ── EMPLOYEE LEAVE ─────────────────────────────────────────── -->
+    <div x-show="page === 'leave'" class="p-8">
+      <h2 class="text-2xl font-bold text-slate-800 mb-6">🏖️ Employee Leave</h2>
+
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+        <!-- Left: Add leave form + list -->
+        <div class="space-y-5">
+
+          <!-- Add leave -->
+          <div class="card">
+            <h3 class="font-bold text-slate-700 mb-4">+ Add Leave</h3>
+            <div class="space-y-3">
+              <div>
+                <label class="label">Employee *</label>
+                <select x-model="leaveForm.employee_id" class="input">
+                  <option value="">Select barber…</option>
+                  <template x-for="e in employees.filter(e=>e.is_active)" :key="e.id">
+                    <option :value="e.id" x-text="e.name"></option>
+                  </template>
+                </select>
+              </div>
+              <div>
+                <label class="label">Start Date *</label>
+                <input type="date" x-model="leaveForm.start_date" class="input">
+              </div>
+              <div>
+                <label class="label">End Date <span class="text-slate-400 font-normal">(leave empty for single day)</span></label>
+                <input type="date" x-model="leaveForm.end_date" class="input">
+              </div>
+              <div>
+                <label class="label">Reason</label>
+                <input type="text" x-model="leaveForm.reason" class="input" placeholder="Vacation, sick, personal…">
+              </div>
+              <button @click="addLeave()" :disabled="leaveSaving || !leaveForm.employee_id || !leaveForm.start_date"
+                      class="btn-primary w-full" x-text="leaveSaving ? 'Saving…' : '💾 Save Leave'"></button>
+            </div>
+          </div>
+
+          <!-- Upcoming leave list -->
+          <div class="card">
+            <h3 class="font-bold text-slate-700 mb-3">Scheduled Leave</h3>
+            <div x-show="leaves.length === 0" class="text-slate-400 text-sm text-center py-4">No leave scheduled this month</div>
+            <div class="space-y-2">
+              <template x-for="l in leaves" :key="l.id">
+                <div class="flex items-start justify-between gap-2 p-3 bg-slate-50 rounded-xl">
+                  <div class="flex items-start gap-2">
+                    <div class="w-3 h-3 rounded-full mt-1 flex-shrink-0" :style="`background:${empColor(l.employee_id)}`"></div>
+                    <div>
+                      <div class="text-sm font-semibold text-slate-700" x-text="empName(l.employee_id)"></div>
+                      <div class="text-xs text-slate-500"
+                           x-text="l.start_date === l.end_date ? l.start_date : l.start_date + ' → ' + l.end_date"></div>
+                      <div class="text-xs text-slate-400 italic" x-show="l.reason" x-text="l.reason"></div>
+                    </div>
+                  </div>
+                  <button @click="deleteLeave(l.id)" class="text-slate-300 hover:text-red-500 text-lg leading-none flex-shrink-0">✕</button>
+                </div>
+              </template>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right: Calendar -->
+        <div class="lg:col-span-2 card">
+          <!-- Month navigation -->
+          <div class="flex items-center justify-between mb-5">
+            <button @click="leaveMonthPrev()" class="btn-secondary text-sm py-1 px-3">‹ Prev</button>
+            <h3 class="font-bold text-slate-700"
+                x-text="new Date(leaveMonth.split('-')[0], leaveMonth.split('-')[1] - 1, 2).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })"></h3>
+            <button @click="leaveMonthNext()" class="btn-secondary text-sm py-1 px-3">Next ›</button>
+          </div>
+
+          <!-- Day-of-week headers -->
+          <div class="grid grid-cols-7 mb-1">
+            <template x-for="d in ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']" :key="d">
+              <div class="text-center text-xs font-semibold text-slate-400 py-1" x-text="d"></div>
+            </template>
+          </div>
+
+          <!-- Calendar grid -->
+          <div class="grid grid-cols-7 gap-1">
+            <template x-for="(cell, idx) in leaveCalendarDays()" :key="idx">
+              <div :class="cell ? 'bg-slate-50 rounded-lg p-1 min-h-16' : ''"
+                   class="text-xs">
+                <template x-if="cell">
+                  <div>
+                    <div class="font-semibold text-slate-500 mb-1" x-text="cell.day"></div>
+                    <template x-for="l in cell.onLeave" :key="l.id">
+                      <div class="rounded px-1 py-0.5 mb-0.5 text-white text-xs truncate"
+                           :style="`background:${empColor(l.employee_id)}`"
+                           :title="empName(l.employee_id) + (l.reason ? ' — ' + l.reason : '')"
+                           x-text="empName(l.employee_id)"></div>
+                    </template>
+                  </div>
+                </template>
+              </div>
+            </template>
+          </div>
+
+          <!-- Legend -->
+          <div class="mt-4 flex flex-wrap gap-3">
+            <template x-for="e in employees.filter(e=>e.is_active)" :key="e.id">
+              <div class="flex items-center gap-1.5 text-xs text-slate-600">
+                <div class="w-3 h-3 rounded-full" :style="`background:${e.color}`"></div>
+                <span x-text="e.name"></span>
+              </div>
+            </template>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
     <!-- ── CLOSED DATES ───────────────────────────────────────────── -->
     <div x-show="page === 'blocks'" class="p-8">
       <h2 class="text-2xl font-bold text-slate-800 mb-6">🚫 Closed Dates & Time-Off</h2>
+
+      <!-- Surinamese Public Holidays -->
+      <div class="card mb-6 border-amber-200 bg-amber-50">
+        <div class="flex items-start justify-between gap-4 flex-wrap">
+          <div>
+            <h3 class="font-bold text-amber-800 mb-1">🇸🇷 Surinamese Public Holidays</h3>
+            <p class="text-xs text-amber-700">Automatically blocks all public holidays shop-wide so customers can't book on those days.</p>
+          </div>
+          <div class="flex items-center gap-3">
+            <select x-model="holidayYear"
+                    @change="api('GET', `/api/holidays/${holidayYear}`).then(r => holidayPreview = r)"
+                    class="input w-28 text-sm">
+              <template x-for="y in [2024,2025,2026,2027,2028]" :key="y">
+                <option :value="y" x-text="y"></option>
+              </template>
+            </select>
+            <button @click="syncHolidays()"
+                    :disabled="holidaySyncing"
+                    class="btn-primary text-sm"
+                    x-text="holidaySyncing ? 'Syncing…' : '🔄 Sync Holidays'"></button>
+          </div>
+        </div>
+        <!-- Preview list -->
+        <div class="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+          <template x-for="h in holidayPreview" :key="h.date">
+            <div class="flex items-center gap-2 text-xs text-amber-800 bg-white rounded-lg px-3 py-1.5 border border-amber-200">
+              <span class="font-mono text-amber-500 flex-shrink-0" x-text="h.date"></span>
+              <span x-text="h.name"></span>
+            </div>
+          </template>
+        </div>
+        <p class="text-xs text-amber-600 mt-3">ℹ️ Islamic & Hindu dates are approximate. Sync adds them to Closed Dates above — remove individually if dates shift.</p>
+      </div>
 
       <!-- Add block form -->
       <div class="card mb-6">
@@ -1058,302 +1205,290 @@
     <div x-show="page === 'settings'" class="p-8">
       <div class="flex justify-between items-center mb-6">
         <h2 class="text-2xl font-bold text-slate-800">Settings</h2>
-        <button @click="saveSettings()" class="btn-primary">💾 Save All</button>
+        <div class="flex items-center gap-3">
+          <span x-show="settingsSaved" class="text-emerald-500 text-sm font-medium">✅ Saved!</span>
+          <button @click="saveSettings()" class="btn-primary">💾 Save All</button>
+        </div>
       </div>
 
-      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <!-- Tab bar -->
+      <div class="flex gap-1 mb-6 bg-slate-100 p-1 rounded-xl w-fit flex-wrap">
+        <button @click="settingsTab='shop'"         :class="settingsTab==='shop'         ? 'bg-white shadow text-slate-800 font-semibold' : 'text-slate-500 hover:text-slate-700'" class="px-4 py-2 rounded-lg text-sm transition">🏪 Shop</button>
+        <button @click="settingsTab='booking'"      :class="settingsTab==='booking'      ? 'bg-white shadow text-slate-800 font-semibold' : 'text-slate-500 hover:text-slate-700'" class="px-4 py-2 rounded-lg text-sm transition">📅 Booking</button>
+        <button @click="settingsTab='notifications'":class="settingsTab==='notifications'? 'bg-white shadow text-slate-800 font-semibold' : 'text-slate-500 hover:text-slate-700'" class="px-4 py-2 rounded-lg text-sm transition">🔔 Notifications</button>
+        <button @click="settingsTab='rules'"        :class="settingsTab==='rules'        ? 'bg-white shadow text-slate-800 font-semibold' : 'text-slate-500 hover:text-slate-700'" class="px-4 py-2 rounded-lg text-sm transition">⚠️ Rules</button>
+        <button @click="settingsTab='integrations'" :class="settingsTab==='integrations' ? 'bg-white shadow text-slate-800 font-semibold' : 'text-slate-500 hover:text-slate-700'" class="px-4 py-2 rounded-lg text-sm transition">🔗 Integrations</button>
+      </div>
 
-        <!-- ── Shop Info ───────────────────────────────────────────── -->
-        <div class="card">
-          <h3 class="font-bold text-slate-700 mb-4">🏪 Shop Info</h3>
-          <div class="space-y-4">
-            <div>
-              <label class="label">Shop Name</label>
-              <input x-model="settings.shop_name" class="input" placeholder="Jayden's Barbershop">
+      <!-- ── TAB: Shop ───────────────────────────────────────────────── -->
+      <div x-show="settingsTab==='shop'" class="max-w-xl space-y-6">
+        <div class="card space-y-4">
+          <h3 class="font-bold text-slate-700">🏪 Shop Info</h3>
+          <div>
+            <label class="label">Shop Name</label>
+            <input x-model="settings.shop_name" class="input" placeholder="Jayden's Barbershop">
+          </div>
+          <div>
+            <label class="label">Address</label>
+            <input x-model="settings.shop_address" class="input" placeholder="Paramaribo, Suriname">
+          </div>
+          <div>
+            <label class="label">Phone / WhatsApp</label>
+            <input x-model="settings.shop_phone" class="input" placeholder="+597 XXX-XXXX">
+            <p class="text-xs text-slate-400 mt-1">Shown to customers when the bot is paused or unavailable.</p>
+          </div>
+          <div>
+            <label class="label">Management / Finance Contact</label>
+            <input x-model="settings.management_phone" class="input" placeholder="+597 XXX-XXXX">
+            <p class="text-xs text-slate-400 mt-1">Referred to customers who ask about discounts, payments or out-of-scope questions. Falls back to shop phone if empty.</p>
+          </div>
+          <div>
+            <label class="label">Email</label>
+            <input x-model="settings.shop_email" class="input" placeholder="info@example.com">
+          </div>
+          <div>
+            <label class="label">Instagram</label>
+            <input x-model="settings.shop_instagram" class="input" placeholder="@jaydensbarbershop">
+          </div>
+          <div>
+            <label class="label">Google Maps Link</label>
+            <input x-model="settings.google_maps_link" class="input" placeholder="https://maps.google.com/...">
+          </div>
+        </div>
+        <div class="card space-y-4">
+          <h3 class="font-bold text-slate-700">🌍 Regional</h3>
+          <div>
+            <label class="label">Currency</label>
+            <input x-model="settings.currency" class="input w-32" placeholder="SRD">
+            <p class="text-xs text-slate-400 mt-1">Shown next to prices in WhatsApp messages (e.g. SRD, USD, EUR).</p>
+          </div>
+          <div>
+            <label class="label">Timezone</label>
+            <select x-model="settings.timezone" class="input">
+              <option value="America/Paramaribo">America/Paramaribo — Suriname (GMT-3)</option>
+              <option value="America/New_York">America/New_York — US East (EST/EDT)</option>
+              <option value="America/Chicago">America/Chicago — US Central (CST/CDT)</option>
+              <option value="America/Denver">America/Denver — US Mountain (MST/MDT)</option>
+              <option value="America/Los_Angeles">America/Los_Angeles — US West (PST/PDT)</option>
+              <option value="America/Curacao">America/Curacao — Curaçao/Aruba (AST)</option>
+              <option value="America/Guyana">America/Guyana — Guyana (GYT)</option>
+              <option value="Europe/Amsterdam">Europe/Amsterdam (CET/CEST)</option>
+              <option value="Europe/London">Europe/London (GMT/BST)</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── TAB: Booking ────────────────────────────────────────────── -->
+      <div x-show="settingsTab==='booking'" class="max-w-xl space-y-6">
+        <div class="card space-y-5">
+          <h3 class="font-bold text-slate-700">📅 Booking Settings</h3>
+          <div>
+            <label class="label">Days Available for Booking</label>
+            <div class="flex items-center gap-3">
+              <input type="number" x-model="settings.booking_days_ahead" class="input w-24" min="1" max="60" placeholder="20">
+              <span class="text-sm text-slate-500">days from today</span>
             </div>
-            <div>
-              <label class="label">Address</label>
-              <input x-model="settings.shop_address" class="input" placeholder="Paramaribo, Suriname">
-            </div>
-            <div>
-              <label class="label">Phone / WhatsApp</label>
-              <input x-model="settings.shop_phone" class="input" placeholder="+597 XXX-XXXX">
-              <p class="text-xs text-slate-400 mt-1">Shown to customers when the bot is paused or unavailable.</p>
-            </div>
-            <div>
-              <label class="label">Management / Finance Contact</label>
-              <input x-model="settings.management_phone" class="input" placeholder="+597 XXX-XXXX">
-              <p class="text-xs text-slate-400 mt-1">Referred to customers when they ask about discounts, payments, or out-of-scope questions. Falls back to the shop phone if left empty.</p>
-            </div>
-            <div>
-              <label class="label">Email</label>
-              <input x-model="settings.shop_email" class="input" placeholder="info@example.com">
-            </div>
-            <div>
-              <label class="label">Instagram</label>
-              <input x-model="settings.shop_instagram" class="input" placeholder="@jaydensbarbershop">
-            </div>
-            <div>
-              <label class="label">Google Maps Link</label>
-              <input x-model="settings.google_maps_link" class="input" placeholder="https://maps.google.com/...">
-            </div>
+            <p class="text-xs text-slate-400 mt-1">How far ahead customers can book. 7 = one week · 14 = two weeks · 20 = three weeks.</p>
+          </div>
+          <div class="flex items-center gap-3">
+            <input type="checkbox" id="chk-any-employee"
+              :checked="settings.allow_any_employee === '1'"
+              @change="settings.allow_any_employee = $event.target.checked ? '1' : '0'"
+              class="w-4 h-4 accent-amber-500">
+            <label for="chk-any-employee" class="text-sm text-slate-700 cursor-pointer">
+              Show <strong>"Any Available Barber"</strong> option in booking flow
+            </label>
           </div>
         </div>
 
-        <div class="space-y-6">
-
-          <!-- ── Booking ───────────────────────────────────────────────── -->
-          <div class="card">
-            <h3 class="font-bold text-slate-700 mb-4">📅 Booking</h3>
-            <div class="space-y-4">
-              <div>
-                <label class="label">Days Available for Booking</label>
-                <div class="flex items-center gap-3">
-                  <input type="number" x-model="settings.booking_days_ahead" class="input w-24" min="1" max="60" placeholder="20">
-                  <span class="text-sm text-slate-500">days from today</span>
-                </div>
-                <p class="text-xs text-slate-400 mt-1">How far ahead customers can book. E.g. 7 = one week, 14 = two weeks, 20 = three weeks.</p>
-              </div>
-            </div>
+        <!-- New Customer Policy -->
+        <div class="card space-y-3">
+          <h3 class="font-bold text-slate-700">🆕 New Customer Policy</h3>
+          <p class="text-xs text-slate-400">When a first-time customer books, automatically assign them to the selected barber (if they offer that service). Leave empty for normal fair-share assignment.</p>
+          <div>
+            <label class="label">Barber for New Customers</label>
+            <select x-model="settings.new_customer_employee_id" class="input">
+              <option value="">— Normal fair-share assignment —</option>
+              <template x-for="e in employees.filter(e => e.is_active)" :key="e.id">
+                <option :value="String(e.id)" x-text="e.name"></option>
+              </template>
+            </select>
           </div>
+        </div>
+      </div>
 
-          <!-- ── Google Calendar ────────────────────────────────────── -->
-          <div class="card">
-            <div class="flex items-start justify-between mb-1">
-              <h3 class="font-bold text-slate-700">📅 Google Calendar</h3>
-              <span class="text-xs px-2 py-0.5 rounded-full font-semibold"
-                :class="{
-                  'bg-emerald-100 text-emerald-700': calendarTestResult === 'ok',
-                  'bg-red-100 text-red-600':         calendarTestResult === 'fail',
-                  'bg-slate-100 text-slate-500':     !calendarTestResult,
-                }"
-                x-text="calendarTestResult === 'ok' ? '✅ Connected' : calendarTestResult === 'fail' ? '❌ Error' : 'Not tested'">
-              </span>
-            </div>
-            <p class="text-xs text-slate-400 mb-4">Appointments booked via WhatsApp automatically appear in this calendar. It also blocks slots you've manually marked as busy.</p>
+      <!-- ── TAB: Notifications ──────────────────────────────────────── -->
+      <div x-show="settingsTab==='notifications'" class="max-w-xl space-y-6">
 
-            <div class="space-y-3">
-              <div>
-                <label class="label">Calendar ID</label>
-                <input x-model="settings.google_calendar_id" class="input font-mono text-xs"
-                  placeholder="yourname@gmail.com"
-                  @input="calendarTestResult = null">
-                <p class="text-xs text-slate-400 mt-1">
-                  Google Calendar → ⚙️ Settings → pick your calendar → <em>Integrate calendar</em> → Calendar ID
-                </p>
-              </div>
-
-              <!-- Test result detail -->
-              <div x-show="calendarTestResult === 'ok'" class="rounded-xl bg-emerald-50 border border-emerald-200 px-4 py-3 text-sm text-emerald-700">
-                ✅ Connected to <strong x-text="calendarTestName"></strong>
-                <span class="text-emerald-500 text-xs ml-1" x-text="calendarTestTz ? '(' + calendarTestTz + ')' : ''"></span>
-              </div>
-              <div x-show="calendarTestResult === 'fail'" class="rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-600">
-                ❌ <span x-text="calendarTestError"></span>
-              </div>
-
-              <div class="flex gap-2">
-                <button @click="testCalendar()" class="btn-secondary text-xs flex items-center gap-1.5" :disabled="calendarTesting">
-                  <svg x-show="calendarTesting" class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
-                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path>
-                  </svg>
-                  <span x-text="calendarTesting ? 'Testing…' : '🔗 Test Connection'"></span>
-                </button>
-                <button @click="saveSettings(); testCalendar()" class="btn-primary text-xs">💾 Save & Test</button>
-              </div>
-            </div>
-          </div>
-
-          <!-- ── Booking ────────────────────────────────────────────── -->
-          <div class="card">
-            <h3 class="font-bold text-slate-700 mb-4">📆 Booking</h3>
-            <div class="space-y-4">
-              <div>
-                <label class="label">Days Ahead Customers Can Book</label>
-                <div class="flex items-center gap-3">
-                  <input type="number" x-model="settings.booking_days_ahead" class="input w-24" min="1" max="60" placeholder="14">
-                  <span class="text-sm text-slate-500">days</span>
-                </div>
-                <p class="text-xs text-slate-400 mt-1">How far in advance a customer can book. Default is 14 days.</p>
-              </div>
-              <div class="flex items-center gap-3 pt-1">
-                <input type="checkbox" id="chk-any-employee"
-                  :checked="settings.allow_any_employee === '1'"
-                  @change="settings.allow_any_employee = $event.target.checked ? '1' : '0'"
-                  class="w-4 h-4 accent-amber-500">
-                <label for="chk-any-employee" class="text-sm text-slate-700 cursor-pointer">
-                  Show <strong>"Any Available Barber"</strong> option in booking flow
-                </label>
-              </div>
-            </div>
-          </div>
-
-          <!-- ── Reminders ─────────────────────────────────────────── -->
-          <div class="card">
-            <div class="flex items-center justify-between mb-1">
+        <!-- Reminders -->
+        <div class="card space-y-4">
+          <div class="flex items-center justify-between">
+            <div>
               <h3 class="font-bold text-slate-700">🔔 Appointment Reminders</h3>
-              <button @click="settings.reminder_enabled = settings.reminder_enabled === '1' ? '0' : '1'"
-                :class="settings.reminder_enabled === '1' ? 'bg-amber-500' : 'bg-slate-300'"
-                class="relative inline-flex h-6 w-11 rounded-full transition-colors flex-shrink-0">
-                <span :class="settings.reminder_enabled === '1' ? 'translate-x-6' : 'translate-x-1'"
-                  class="inline-block h-4 w-4 rounded-full bg-white shadow mt-1 transition-transform"></span>
-              </button>
+              <p class="text-xs text-slate-400 mt-0.5">Send customers a WhatsApp reminder before their appointment.</p>
             </div>
-            <p class="text-xs text-slate-400 mb-4">Automatically send customers a WhatsApp reminder before their appointment.</p>
-            <div x-show="settings.reminder_enabled === '1'" class="space-y-3">
-              <div>
-                <label class="label">Hours before appointment</label>
-                <div class="flex items-center gap-3">
-                  <input type="number" x-model="settings.reminder_hours" class="input w-24" min="1" max="168" placeholder="24">
-                  <span class="text-sm text-slate-500">hours before</span>
-                </div>
-                <div class="flex gap-2 mt-2">
-                  <template x-for="h in [2, 6, 12, 24, 48]" :key="h">
-                    <button type="button" @click="settings.reminder_hours = String(h)"
-                      class="px-2.5 py-1 rounded-lg text-xs font-medium border transition"
-                      :class="settings.reminder_hours == h ? 'bg-amber-500 text-white border-amber-500' : 'bg-white text-slate-600 border-slate-200 hover:border-amber-400'">
-                      <span x-text="h + 'h'"></span>
-                    </button>
-                  </template>
-                </div>
-              </div>
-              <p class="text-xs text-slate-400">
-                💬 Edit the reminder message text in <button @click="nav('messages')" class="text-amber-500 underline">Bot Messages</button>.
-              </p>
-            </div>
+            <button @click="settings.reminder_enabled = settings.reminder_enabled === '1' ? '0' : '1'"
+              :class="settings.reminder_enabled === '1' ? 'bg-amber-500' : 'bg-slate-300'"
+              class="relative inline-flex h-6 w-11 rounded-full transition-colors flex-shrink-0">
+              <span :class="settings.reminder_enabled === '1' ? 'translate-x-6' : 'translate-x-1'"
+                class="inline-block h-4 w-4 rounded-full bg-white shadow mt-1 transition-transform"></span>
+            </button>
           </div>
-
-          <!-- ── No-Show Warnings ───────────────────────────────────────────────── -->
-          <div class="card">
-            <h3 class="font-bold text-slate-700 mb-1">🚫 No-Show Warnings</h3>
-            <p class="text-xs text-slate-400 mb-4">Automatically sends a WhatsApp warning to the customer when their no-show count reaches the threshold. Use <code class="bg-slate-100 px-1 rounded">{name}</code> and <code class="bg-slate-100 px-1 rounded">{count}</code> as placeholders.</p>
-            <div class="space-y-4">
-
-              <!-- Warning 1 -->
-              <div class="border border-amber-200 bg-amber-50 rounded-xl p-4 space-y-3">
-                <div class="flex items-center gap-3">
-                  <span class="text-sm font-bold text-amber-700">⚠️ Warning 1</span>
-                  <span class="text-xs text-slate-500">After</span>
-                  <input type="number" x-model="settings.warning_1_threshold" class="input w-16 text-center" min="1" max="20">
-                  <span class="text-xs text-slate-500">no-show(s)</span>
-                </div>
-                <textarea rows="3" x-model="settings.warning_1_message" class="input text-sm" placeholder="Warning 1 message…"></textarea>
+          <div x-show="settings.reminder_enabled === '1'" class="space-y-3">
+            <div>
+              <label class="label">Hours before appointment</label>
+              <div class="flex items-center gap-3">
+                <input type="number" x-model="settings.reminder_hours" class="input w-24" min="1" max="168" placeholder="24">
+                <span class="text-sm text-slate-500">hours before</span>
               </div>
-
-              <!-- Warning 2 -->
-              <div class="border border-orange-200 bg-orange-50 rounded-xl p-4 space-y-3">
-                <div class="flex items-center gap-3">
-                  <span class="text-sm font-bold text-orange-700">🔶 Warning 2</span>
-                  <span class="text-xs text-slate-500">After</span>
-                  <input type="number" x-model="settings.warning_2_threshold" class="input w-16 text-center" min="1" max="20">
-                  <span class="text-xs text-slate-500">no-show(s)</span>
-                </div>
-                <textarea rows="3" x-model="settings.warning_2_message" class="input text-sm" placeholder="Warning 2 message…"></textarea>
-              </div>
-
-              <!-- Warning 3 -->
-              <div class="border border-red-200 bg-red-50 rounded-xl p-4 space-y-3">
-                <div class="flex items-center gap-3">
-                  <span class="text-sm font-bold text-red-700">🚫 Warning 3</span>
-                  <span class="text-xs text-slate-500">After</span>
-                  <input type="number" x-model="settings.warning_3_threshold" class="input w-16 text-center" min="1" max="20">
-                  <span class="text-xs text-slate-500">no-show(s)</span>
-                </div>
-                <textarea rows="3" x-model="settings.warning_3_message" class="input text-sm" placeholder="Warning 3 message…"></textarea>
-              </div>
-
-            </div>
-          </div>
-
-          <!-- ── Customer Service / Notification Numbers ──────────────────────── -->
-          <div class="card">
-            <h3 class="font-bold text-slate-700 mb-1">📲 Customer Service Numbers</h3>
-            <p class="text-xs text-slate-400 mb-4">These numbers receive automatic WhatsApp notifications for: new bookings (with customer details), cancellations, ratings, and first-time customers. Up to 2 numbers.</p>
-            <div class="space-y-4">
-              <div>
-                <label class="label">CS Number 1</label>
-                <input x-model="settings.cs_phone_1" class="input" placeholder="+597 XXX-XXXX">
-              </div>
-              <div>
-                <label class="label">CS Number 2 <span class="text-slate-400 font-normal">(optional)</span></label>
-                <input x-model="settings.cs_phone_2" class="input" placeholder="+597 XXX-XXXX">
+              <div class="flex gap-2 mt-2">
+                <template x-for="h in [2, 6, 12, 24, 48]" :key="h">
+                  <button type="button" @click="settings.reminder_hours = String(h)"
+                    class="px-2.5 py-1 rounded-lg text-xs font-medium border transition"
+                    :class="settings.reminder_hours == h ? 'bg-amber-500 text-white border-amber-500' : 'bg-white text-slate-600 border-slate-200 hover:border-amber-400'">
+                    <span x-text="h + 'h'"></span>
+                  </button>
+                </template>
               </div>
             </div>
+            <p class="text-xs text-slate-400">💬 Edit message text in <button @click="nav('messages')" class="text-amber-500 underline">Bot Messages</button>.</p>
           </div>
+        </div>
 
-          <!-- ── Human Takeover ────────────────────────────────────────── -->
-          <div class="card">
-            <h3 class="font-bold text-slate-700 mb-1">👤 Human Takeover Keywords</h3>
-            <p class="text-xs text-slate-400 mb-4">Type these keywords in any customer WhatsApp chat to take over or release that conversation. The bot goes completely silent while a chat is paused.</p>
-            <div class="space-y-4">
-              <div>
-                <label class="label">Takeover Keyword</label>
-                <input x-model="settings.takeover_keyword" class="input font-mono" placeholder="#human">
-                <p class="text-xs text-slate-400 mt-1">Type this to pause the bot for that chat.</p>
-              </div>
-              <div>
-                <label class="label">Release Keyword</label>
-                <input x-model="settings.release_keyword" class="input font-mono" placeholder="#bot">
-                <p class="text-xs text-slate-400 mt-1">Type this to hand the conversation back to the bot.</p>
-              </div>
+        <!-- CS Numbers -->
+        <div class="card space-y-4">
+          <h3 class="font-bold text-slate-700">📲 Customer Service Numbers</h3>
+          <p class="text-xs text-slate-400">These numbers receive WhatsApp notifications for: new bookings, cancellations, ratings, and first-time customers. Up to 2 numbers.</p>
+          <div>
+            <label class="label">CS Number 1</label>
+            <input x-model="settings.cs_phone_1" class="input" placeholder="+597 XXX-XXXX">
+          </div>
+          <div>
+            <label class="label">CS Number 2 <span class="text-slate-400 font-normal">(optional)</span></label>
+            <input x-model="settings.cs_phone_2" class="input" placeholder="+597 XXX-XXXX">
+          </div>
+        </div>
+
+        <!-- Survey -->
+        <div class="card space-y-4">
+          <div class="flex items-center justify-between">
+            <div>
+              <h3 class="font-bold text-slate-700">⭐ Post-Appointment Survey</h3>
+              <p class="text-xs text-slate-400 mt-0.5">Ask customers to rate their visit after the appointment.</p>
             </div>
+            <button @click="settings.survey_enabled = settings.survey_enabled === '1' ? '0' : '1'"
+              :class="settings.survey_enabled === '1' ? 'bg-amber-500' : 'bg-slate-300'"
+              class="relative inline-flex h-6 w-11 rounded-full transition-colors flex-shrink-0">
+              <span :class="settings.survey_enabled === '1' ? 'translate-x-6' : 'translate-x-1'"
+                class="inline-block h-4 w-4 rounded-full bg-white shadow mt-1 transition-transform"></span>
+            </button>
           </div>
+          <div x-show="settings.survey_enabled === '1'">
+            <label class="label">Send survey after (minutes)</label>
+            <input type="number" x-model="settings.survey_delay_minutes" class="input w-32" min="5" max="1440" placeholder="30">
+            <p class="text-xs text-slate-400 mt-1">Minutes after appointment ends before the survey is sent.</p>
+          </div>
+        </div>
 
-          <!-- ── Post-Appointment Survey ─────────────────────────────── -->
-          <div class="card">
-            <h3 class="font-bold text-slate-700 mb-4">⭐ Post-Appointment Survey</h3>
-            <div class="space-y-4">
-              <div class="flex items-center justify-between">
-                <div>
-                  <p class="text-sm font-medium text-slate-700">Enable Survey</p>
-                  <p class="text-xs text-slate-400">Automatically ask customers to rate their visit after the appointment.</p>
-                </div>
-                <button @click="settings.survey_enabled = settings.survey_enabled === '1' ? '0' : '1'"
-                  :class="settings.survey_enabled === '1' ? 'bg-amber-500' : 'bg-slate-300'"
-                  class="relative inline-flex h-6 w-11 rounded-full transition-colors flex-shrink-0">
-                  <span :class="settings.survey_enabled === '1' ? 'translate-x-6' : 'translate-x-1'"
-                    class="inline-block h-4 w-4 rounded-full bg-white shadow mt-1 transition-transform"></span>
-                </button>
-              </div>
-              <div x-show="settings.survey_enabled === '1'">
-                <label class="label">Send survey after (minutes)</label>
-                <input type="number" x-model="settings.survey_delay_minutes" class="input w-32" min="5" max="1440" placeholder="30">
-                <p class="text-xs text-slate-400 mt-1">How many minutes after the appointment ends before the survey is sent.</p>
-              </div>
+      </div>
+
+      <!-- ── TAB: Rules ──────────────────────────────────────────────── -->
+      <div x-show="settingsTab==='rules'" class="max-w-xl space-y-6">
+
+        <!-- No-Show Warnings -->
+        <div class="card space-y-4">
+          <h3 class="font-bold text-slate-700">🚫 No-Show Warnings</h3>
+          <p class="text-xs text-slate-400">Sends a WhatsApp warning when a customer's no-show count hits the threshold. Use <code class="bg-slate-100 px-1 rounded">{name}</code> and <code class="bg-slate-100 px-1 rounded">{count}</code> as placeholders.</p>
+          <div class="border border-amber-200 bg-amber-50 rounded-xl p-4 space-y-3">
+            <div class="flex items-center gap-3">
+              <span class="text-sm font-bold text-amber-700">⚠️ Warning 1 — After</span>
+              <input type="number" x-model="settings.warning_1_threshold" class="input w-16 text-center" min="1" max="20">
+              <span class="text-xs text-slate-500">no-show(s)</span>
             </div>
+            <textarea rows="3" x-model="settings.warning_1_message" class="input text-sm" placeholder="Warning 1 message…"></textarea>
           </div>
-
-          <!-- ── Regional ───────────────────────────────────────────── -->
-          <div class="card">
-            <h3 class="font-bold text-slate-700 mb-4">🌍 Regional</h3>
-            <div class="space-y-4">
-              <div>
-                <label class="label">Currency</label>
-                <input x-model="settings.currency" class="input" placeholder="SRD">
-                <p class="text-xs text-slate-400 mt-1">Shown next to prices in WhatsApp messages (e.g. SRD, USD, EUR).</p>
-              </div>
-              <div>
-                <label class="label">Timezone</label>
-                <select x-model="settings.timezone" class="input">
-                  <option value="America/Paramaribo">America/Paramaribo — Suriname (GMT-3)</option>
-                  <option value="America/New_York">America/New_York — US East (EST/EDT)</option>
-                  <option value="America/Chicago">America/Chicago — US Central (CST/CDT)</option>
-                  <option value="America/Denver">America/Denver — US Mountain (MST/MDT)</option>
-                  <option value="America/Los_Angeles">America/Los_Angeles — US West (PST/PDT)</option>
-                  <option value="America/Curacao">America/Curacao — Curaçao/Aruba (AST)</option>
-                  <option value="America/Guyana">America/Guyana — Guyana (GYT)</option>
-                  <option value="Europe/Amsterdam">Europe/Amsterdam (CET/CEST)</option>
-                  <option value="Europe/London">Europe/London (GMT/BST)</option>
-                </select>
-              </div>
+          <div class="border border-orange-200 bg-orange-50 rounded-xl p-4 space-y-3">
+            <div class="flex items-center gap-3">
+              <span class="text-sm font-bold text-orange-700">🔶 Warning 2 — After</span>
+              <input type="number" x-model="settings.warning_2_threshold" class="input w-16 text-center" min="1" max="20">
+              <span class="text-xs text-slate-500">no-show(s)</span>
             </div>
+            <textarea rows="3" x-model="settings.warning_2_message" class="input text-sm" placeholder="Warning 2 message…"></textarea>
           </div>
+          <div class="border border-red-200 bg-red-50 rounded-xl p-4 space-y-3">
+            <div class="flex items-center gap-3">
+              <span class="text-sm font-bold text-red-700">🚫 Warning 3 — After</span>
+              <input type="number" x-model="settings.warning_3_threshold" class="input w-16 text-center" min="1" max="20">
+              <span class="text-xs text-slate-500">no-show(s)</span>
+            </div>
+            <textarea rows="3" x-model="settings.warning_3_message" class="input text-sm" placeholder="Warning 3 message…"></textarea>
+          </div>
+        </div>
 
-        </div><!-- end right column -->
-      </div><!-- end grid -->
+        <!-- Human Takeover -->
+        <div class="card space-y-4">
+          <h3 class="font-bold text-slate-700">👤 Human Takeover Keywords</h3>
+          <p class="text-xs text-slate-400">Type these keywords in any customer WhatsApp chat to pause or resume the bot for that specific conversation.</p>
+          <div>
+            <label class="label">Takeover Keyword</label>
+            <input x-model="settings.takeover_keyword" class="input font-mono" placeholder="#human">
+            <p class="text-xs text-slate-400 mt-1">Pauses the bot — bot goes completely silent for that chat.</p>
+          </div>
+          <div>
+            <label class="label">Release Keyword</label>
+            <input x-model="settings.release_keyword" class="input font-mono" placeholder="#bot">
+            <p class="text-xs text-slate-400 mt-1">Hands the conversation back to the bot.</p>
+          </div>
+        </div>
 
-      <div class="mt-6 flex gap-3 items-center">
+      </div>
+
+      <!-- ── TAB: Integrations ───────────────────────────────────────── -->
+      <div x-show="settingsTab==='integrations'" class="max-w-xl space-y-6">
+        <div class="card space-y-4">
+          <div class="flex items-start justify-between">
+            <h3 class="font-bold text-slate-700">📅 Google Calendar</h3>
+            <span class="text-xs px-2 py-0.5 rounded-full font-semibold"
+              :class="{
+                'bg-emerald-100 text-emerald-700': calendarTestResult === 'ok',
+                'bg-red-100 text-red-600':         calendarTestResult === 'fail',
+                'bg-slate-100 text-slate-500':     !calendarTestResult,
+              }"
+              x-text="calendarTestResult === 'ok' ? '✅ Connected' : calendarTestResult === 'fail' ? '❌ Error' : 'Not tested'">
+            </span>
+          </div>
+          <p class="text-xs text-slate-400">Appointments appear automatically in this calendar. Manual busy blocks are also respected for availability.</p>
+          <div>
+            <label class="label">Calendar ID</label>
+            <input x-model="settings.google_calendar_id" class="input font-mono text-xs"
+              placeholder="yourname@gmail.com"
+              @input="calendarTestResult = null">
+            <p class="text-xs text-slate-400 mt-1">
+              Google Calendar → ⚙️ Settings → pick your calendar → <em>Integrate calendar</em> → Calendar ID
+            </p>
+          </div>
+          <div x-show="calendarTestResult === 'ok'" class="rounded-xl bg-emerald-50 border border-emerald-200 px-4 py-3 text-sm text-emerald-700">
+            ✅ Connected to <strong x-text="calendarTestName"></strong>
+            <span class="text-emerald-500 text-xs ml-1" x-text="calendarTestTz ? '(' + calendarTestTz + ')' : ''"></span>
+          </div>
+          <div x-show="calendarTestResult === 'fail'" class="rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-600">
+            ❌ <span x-text="calendarTestError"></span>
+          </div>
+          <div class="flex gap-2">
+            <button @click="testCalendar()" class="btn-secondary text-xs flex items-center gap-1.5" :disabled="calendarTesting">
+              <svg x-show="calendarTesting" class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path>
+              </svg>
+              <span x-text="calendarTesting ? 'Testing…' : '🔗 Test Connection'"></span>
+            </button>
+            <button @click="saveSettings(); testCalendar()" class="btn-primary text-xs">💾 Save & Test</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="mt-8 flex gap-3 items-center">
         <button @click="saveSettings()" class="btn-primary">💾 Save Settings</button>
         <span x-show="settingsSaved" class="text-emerald-500 text-sm font-medium">✅ Saved!</span>
       </div>
@@ -1510,6 +1645,17 @@ function app() {
     apptSearch: '',
     selectedHoursEmployee: null,
 
+    // Surinamese holidays
+    holidayYear:    new Date().getFullYear(),
+    holidayPreview: [],
+    holidaySyncing: false,
+
+    // Leave management
+    leaves:         [],
+    leaveMonth:     new Date().toISOString().slice(0, 7), // YYYY-MM
+    leaveForm:      { employee_id: '', start_date: '', end_date: '', reason: '' },
+    leaveSaving:    false,
+
     // Customer profiles
     customers: [],
     customerFilter: 'all',  // 'all' | 'noshows' | 'blocked'
@@ -1531,6 +1677,9 @@ function app() {
     calendarTestName:   '',
     calendarTestTz:     '',
     calendarTestError:  '',
+
+    // Settings tabs
+    settingsTab: 'shop',
 
     // UI state
     botPaused: false,
@@ -1659,6 +1808,10 @@ function app() {
       if (p === 'hours')        await this.loadHours();
       if (p === 'blocks')       await this.loadBlocks();
       if (p === 'services')     this.services = await this.api('GET', '/api/services');
+      if (p === 'blocks') {
+        this.holidayPreview = await this.api('GET', `/api/holidays/${this.holidayYear}`);
+      }
+      if (p === 'leave')        await this.loadLeaves();
       if (p === 'customers')    this.customers   = await this.api('GET', '/api/customers');
       if (p === 'messages')     this.botMessages = await this.api('GET', '/api/messages');
       if (p === 'settings') {
@@ -1877,6 +2030,69 @@ function app() {
     async toggleEmployee(id) {
       await this.api('POST', `/api/employees/${id}/toggle`);
       this.employees = await this.api('GET', '/api/employees');
+    },
+
+    // ── Surinamese holidays ───────────────────────────────────────────────────
+    async syncHolidays() {
+      this.holidaySyncing = true;
+      const result = await this.api('POST', '/api/holidays/sync', { year: this.holidayYear });
+      this.holidaySyncing = false;
+      if (result.ok) {
+        this.showToast(`🇸🇷 ${result.added} holiday(s) added for ${this.holidayYear}`);
+        await this.loadBlocks();
+      }
+    },
+
+    // ── Leave management ─────────────────────────────────────────────────────
+    async loadLeaves() {
+      this.leaves = await this.api('GET', `/api/leaves?month=${this.leaveMonth}`);
+    },
+    leaveMonthPrev() {
+      const [y, m] = this.leaveMonth.split('-').map(Number);
+      const d = new Date(y, m - 2, 1);
+      this.leaveMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      this.loadLeaves();
+    },
+    leaveMonthNext() {
+      const [y, m] = this.leaveMonth.split('-').map(Number);
+      const d = new Date(y, m, 1);
+      this.leaveMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      this.loadLeaves();
+    },
+    async addLeave() {
+      if (!this.leaveForm.employee_id || !this.leaveForm.start_date) return;
+      this.leaveSaving = true;
+      await this.api('POST', '/api/leaves', this.leaveForm);
+      this.leaveForm = { employee_id: '', start_date: '', end_date: '', reason: '' };
+      await this.loadLeaves();
+      this.leaveSaving = false;
+      this.showToast('🏖️ Leave added');
+    },
+    async deleteLeave(id) {
+      await this.api('DELETE', `/api/leaves/${id}`);
+      await this.loadLeaves();
+      this.showToast('🗑️ Leave removed');
+    },
+    // Build calendar days for the current leaveMonth
+    leaveCalendarDays() {
+      const [y, m] = this.leaveMonth.split('-').map(Number);
+      const first  = new Date(y, m - 1, 1);
+      const last   = new Date(y, m, 0);
+      const days   = [];
+      // Leading blank cells (Sun=0)
+      for (let i = 0; i < first.getDay(); i++) days.push(null);
+      for (let d = 1; d <= last.getDate(); d++) {
+        const dateStr = `${this.leaveMonth}-${String(d).padStart(2,'0')}`;
+        const onLeave = this.leaves.filter(l => l.start_date <= dateStr && l.end_date >= dateStr);
+        days.push({ day: d, dateStr, onLeave });
+      }
+      return days;
+    },
+    empColor(id) {
+      return this.employees.find(e => String(e.id) === String(id))?.color || '#94a3b8';
+    },
+    empName(id) {
+      return this.employees.find(e => String(e.id) === String(id))?.name || '?';
     },
 
     // ── Customer management ───────────────────────────────────────────────────

@@ -112,6 +112,42 @@ async function createAppointment({ service, startTime, endTime, customerName, bo
 }
 
 /**
+ * Create an all-day leave event on an employee's Google Calendar.
+ * @param {object} opts
+ * @param {string} opts.calendarId   - employee's personal calendar ID
+ * @param {string} opts.employeeName
+ * @param {string} opts.startDate    - 'YYYY-MM-DD'
+ * @param {string} opts.endDate      - 'YYYY-MM-DD' (inclusive)
+ * @param {string} [opts.reason]
+ */
+async function createLeaveEvent({ calendarId, employeeName, startDate, endDate, reason }) {
+  if (!calendarId) return { success: false, error: 'No calendar configured for this employee' };
+  try {
+    const cal = await _getCalendar();
+
+    // Google Calendar all-day end date is exclusive → add 1 day
+    const endExclusive = new Date(endDate);
+    endExclusive.setDate(endExclusive.getDate() + 1);
+    const endStr = endExclusive.toISOString().split('T')[0];
+
+    const event = {
+      summary:     `🏖️ ${employeeName}${reason ? ` — ${reason}` : ' — Leave'}`,
+      description: reason || 'Employee leave',
+      start: { date: startDate },
+      end:   { date: endStr },
+      colorId: '8', // Graphite
+    };
+
+    const res = await cal.events.insert({ calendarId, resource: event });
+    console.log(`✅ Leave event created → ${res.data.htmlLink}`);
+    return { success: true, eventId: res.data.id };
+  } catch (err) {
+    console.error('❌ Google Calendar leave error:', err.message);
+    return { success: false, error: err.message };
+  }
+}
+
+/**
  * Delete a Google Calendar event (used when cancelling an appointment).
  */
 async function cancelEvent({ calendarId, eventId }) {
@@ -207,4 +243,4 @@ async function listEvents(calendarId, dateStr) {
   }
 }
 
-module.exports = { createAppointment, cancelEvent, updateEvent, listEvents, GCAL_COLORS };
+module.exports = { createAppointment, cancelEvent, updateEvent, listEvents, createLeaveEvent, GCAL_COLORS };

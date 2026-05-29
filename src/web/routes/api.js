@@ -6,7 +6,7 @@ const express   = require('express');
 const router    = express.Router();
 const q                  = require('../../db/queries');
 const { state: waState, update: waUpdate } = require('../../whatsapp-state');
-const { GCAL_COLORS, cancelEvent } = require('../../services/googleCalendar');
+const { GCAL_COLORS, cancelEvent, createLeaveEvent } = require('../../services/googleCalendar');
 const { getClient }      = require('../../whatsapp-client');
 const chatPause          = require('../../utils/chatPause');
 const { startBot }       = require('../../bot-runner');
@@ -520,6 +520,77 @@ router.get('/chat-pauses', (req, res) => {
 router.post('/chat-pauses/:chatId/resume', (req, res) => {
   chatPause.resumeChat(decodeURIComponent(req.params.chatId));
   res.json({ ok: true });
+});
+
+// ── Employee Leave ────────────────────────────────────────────────────────────
+
+router.get('/leaves', (req, res) => {
+  try {
+    const { employee_id, month } = req.query;
+    res.json(q.getLeaves({ employeeId: employee_id, month }));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/leaves', async (req, res) => {
+  try {
+    const { employee_id, start_date, end_date, reason } = req.body;
+    if (!employee_id || !start_date) return res.status(400).json({ error: 'employee_id and start_date required' });
+    if (end_date && end_date < start_date) return res.status(400).json({ error: 'end_date must be on or after start_date' });
+
+    // Create Google Calendar all-day event on the employee's personal calendar
+    const employee = q.getEmployee(employee_id);
+    let googleEventId = '';
+    if (employee?.google_calendar_id) {
+      const gcalResult = await createLeaveEvent({
+        calendarId:   employee.google_calendar_id,
+        employeeName: employee.name,
+        startDate:    start_date,
+        endDate:      end_date || start_date,
+        reason,
+      });
+      if (gcalResult.success) googleEventId = gcalResult.eventId;
+    }
+
+    const result = q.addLeave({
+      employeeId:    employee_id,
+      startDate:     start_date,
+      endDate:       end_date || start_date,
+      reason,
+      googleEventId,
+    });
+    res.json({ ok: true, id: result.lastInsertRowid });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.delete('/leaves/:id', async (req, res) => {
+  try {
+    const leave    = q.getLeave(req.params.id);
+    const employee = leave?.employee_id ? q.getEmployee(leave.employee_id) : null;
+
+    // Remove from Google Calendar
+    if (leave?.google_event_id && employee?.google_calendar_id) {
+      cancelEvent({ calendarId: employee.google_calendar_id, eventId: leave.google_event_id })
+        .catch(e => console.error('⚠️  Leave calendar delete:', e.message));
+    }
+
+    q.deleteLeave(req.params.id);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Surinamese Public Holidays ────────────────────────────────────────────────
+
+router.get('/holidays/:year', (req, res) => {
+  try { res.json(q.getSurinameseHolidays(req.params.year)); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/holidays/sync', (req, res) => {
+  try {
+    const year   = parseInt(req.body.year, 10) || new Date().getFullYear();
+    const result = q.syncSurinameseHolidays(year);
+    res.json({ ok: true, ...result });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ── Blocked Dates (shop closures, barber days-off, time blocks) ───────────────

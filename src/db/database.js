@@ -17,6 +17,7 @@ const db = {
   botMessages:   new JsonCollection(path.join(DATA_DIR, 'bot_messages.json')),
   blockedDates:  new JsonCollection(path.join(DATA_DIR, 'blocked_dates.json')),
   customers:     new JsonCollection(path.join(DATA_DIR, 'customers.json')),
+  leaves:        new JsonCollection(path.join(DATA_DIR, 'leaves.json')),
   settings:      new JsonKVStore(path.join(DATA_DIR, 'settings.json')),
 };
 
@@ -87,6 +88,7 @@ function seedIfEmpty() {
     reminder_hours:       '24',
     survey_enabled:       '0',
     survey_delay_minutes: '30',
+    new_customer_employee_id: '', // barber ID who handles all new customers
     takeover_keyword:     '#human',
     release_keyword:      '#bot',
     cs_phone_1:           '',
