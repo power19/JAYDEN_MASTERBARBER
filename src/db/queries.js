@@ -16,11 +16,59 @@ const setManySettings = obj     => db.settings.setMany(obj);
 const getEmployees       = ()    => db.employees.find().sort((a,b) => a.id - b.id);
 const getActiveEmployees = ()    => db.employees.find(e => e.is_active).sort((a,b) => a.id - b.id);
 const getEmployee        = id    => db.employees.findOne(e => String(e.id) === String(id));
-const createEmployee     = (name, phone, color, gcalId) =>
-  db.employees.insert({ name, phone: phone||'', color: color||'#f59e0b', google_calendar_id: gcalId||'', is_active: 1 });
+const createEmployee     = (name, phone, color, gcalId, excludedServiceIds) =>
+  db.employees.insert({ name, phone: phone||'', color: color||'#f59e0b', google_calendar_id: gcalId||'', is_active: 1, excluded_service_ids: excludedServiceIds||[] });
 const updateEmployee     = (id, data) =>
-  db.employees.updateById(id, { name: data.name, phone: data.phone||'', color: data.color, google_calendar_id: data.google_calendar_id||'' });
+  db.employees.updateById(id, { name: data.name, phone: data.phone||'', color: data.color, google_calendar_id: data.google_calendar_id||'', excluded_service_ids: data.excluded_service_ids||[] });
+
+/** Returns active employees who can perform the given service.
+ *  Uses excluded_service_ids — if the service is NOT in the exclusion list, the employee can do it.
+ *  New services automatically appear for everyone (not in anyone's exclusion list by default). */
+const getEmployeesForService = (serviceId) =>
+  db.employees.find(e => e.is_active && !e.excluded_service_ids?.includes(serviceId))
+    .sort((a, b) => a.id - b.id);
 const toggleEmployee     = id   => db.employees.toggle(id, 'is_active');
+
+/**
+ * Returns true if the employee has an "away today" all-day block for today.
+ */
+function isEmployeeAwayToday(employeeId) {
+  const today = _dateStr(new Date());
+  return !!db.blockedDates.findOne(b =>
+    b.date === today &&
+    String(b.employee_id) === String(employeeId) &&
+    b.all_day === 1 &&
+    b.reason === 'away_today'
+  );
+}
+
+/**
+ * Toggle the "away today" status for an employee.
+ * Adds an all-day block if not set; removes it if already set.
+ * Returns the new away state (true = away, false = back).
+ */
+function toggleEmployeeAwayToday(employeeId) {
+  const today    = _dateStr(new Date());
+  const existing = db.blockedDates.findOne(b =>
+    b.date === today &&
+    String(b.employee_id) === String(employeeId) &&
+    b.all_day === 1 &&
+    b.reason === 'away_today'
+  );
+  if (existing) {
+    db.blockedDates.removeById(existing.id);
+    return false; // now available
+  }
+  db.blockedDates.insert({
+    date:        today,
+    employee_id: parseInt(employeeId, 10),
+    all_day:     1,
+    start_time:  null,
+    end_time:    null,
+    reason:      'away_today',
+  });
+  return true; // now away
+}
 
 // ── Business Hours ────────────────────────────────────────────────────────────
 
@@ -166,21 +214,101 @@ function createAppointment(data) {
     service_price:    +data.service_price,
     start_time:       data.start_time instanceof Date ? data.start_time.toISOString() : data.start_time,
     end_time:         data.end_time   instanceof Date ? data.end_time.toISOString()   : data.end_time,
-    google_event_id:  data.google_event_id || '',
+    google_event_id:   data.google_event_id  || '',
+    google_event_link: data.google_event_link || '',
     status:           data.status || 'confirmed',
     notes:            data.notes || '',
+    reminder_sent:    0,
   });
   // Return the code alongside the insert result so callers can show it
   return { ...result, booking_code };
 }
 
-function updateAppointment(id, { status, notes, google_event_id } = {}) {
+/** Look up an appointment by its 4-char booking code (case-insensitive). */
+const getAppointmentByCode = (code) =>
+  db.appointments.findOne(a => a.booking_code === code.trim().toUpperCase());
+
+/** Look up an appointment by its numeric ID. */
+const getAppointmentById = (id) =>
+  db.appointments.findOne(a => String(a.id) === String(id));
+
+/**
+ * Find confirmed appointments whose end_time was at least `delayMinutes` ago
+ * and whose survey has not yet been sent.
+ */
+function getUnsurveyedAppointments(delayMinutes = 30) {
+  const cutoff = new Date(Date.now() - delayMinutes * 60_000).toISOString();
+  return db.appointments.find(a =>
+    a.status === 'confirmed' &&
+    a.end_time < cutoff &&
+    !a.survey_sent
+  );
+}
+
+/** Mark a survey as sent so it never fires again for this appointment. */
+const markSurveySent = (id) =>
+  db.appointments.updateById(id, { survey_sent: 1 });
+
+/** Save the customer's rating (1–5) on the appointment. */
+const saveRating = (id, rating) =>
+  db.appointments.updateById(id, { rating: parseInt(rating, 10) });
+
+/**
+ * Returns true if the phone number has NO previous non-cancelled appointments.
+ * Used by the bot to detect first-time customers and show a warm welcome.
+ */
+const isNewCustomer = (phone) =>
+  !db.appointments.findOne(a => a.customer_phone === phone && a.status !== 'cancelled');
+
+/** Mark an appointment cancelled. */
+const cancelAppointment = (id) =>
+  db.appointments.updateById(id, { status: 'cancelled' });
+
+/** Update start/end times (reschedule). Keeps all other fields intact. */
+function rescheduleAppointment(id, startTime, endTime) {
+  return db.appointments.updateById(id, {
+    start_time: startTime instanceof Date ? startTime.toISOString() : startTime,
+    end_time:   endTime   instanceof Date ? endTime.toISOString()   : endTime,
+  });
+}
+
+function updateAppointment(id, { status, notes, google_event_id, google_event_link, reminder_sent } = {}) {
   const updates = {};
-  if (status         != null) updates.status         = status;
-  if (notes          != null) updates.notes          = notes;
-  if (google_event_id != null) updates.google_event_id = google_event_id;
+  if (status             != null) updates.status             = status;
+  if (notes              != null) updates.notes              = notes;
+  if (google_event_id    != null) updates.google_event_id    = google_event_id;
+  if (google_event_link  != null) updates.google_event_link  = google_event_link;
+  if (reminder_sent      != null) updates.reminder_sent      = reminder_sent;
   return db.appointments.updateById(id, updates);
 }
+
+// ── Blocked dates / time-off ──────────────────────────────────────────────────
+
+/**
+ * Returns blocks sorted by date.
+ * Pass date ('YYYY-MM-DD') and/or employeeId to filter.
+ * employee_id === null means shop-wide; a numeric ID is barber-specific.
+ */
+function getBlocks({ date, employeeId } = {}) {
+  let results = db.blockedDates.find();
+  if (date)             results = results.filter(b => b.date === date);
+  if (employeeId !== undefined && employeeId !== '')
+    results = results.filter(b => String(b.employee_id) === String(employeeId));
+  return results.sort((a, b) => a.date.localeCompare(b.date));
+}
+
+function addBlock(data) {
+  return db.blockedDates.insert({
+    date:        data.date,
+    employee_id: (data.employee_id != null && data.employee_id !== '') ? +data.employee_id : null,
+    all_day:     data.all_day ? 1 : 0,
+    start_time:  data.all_day ? null : (data.start_time || null),
+    end_time:    data.all_day ? null : (data.end_time   || null),
+    reason:      data.reason  || '',
+  });
+}
+
+const deleteBlock = (id) => db.blockedDates.removeById(id);
 
 // ── Slot generation ───────────────────────────────────────────────────────────
 
@@ -206,7 +334,7 @@ function _generateSlots(baseDate, openTime, closeTime, serviceDuration, interval
   return slots;
 }
 
-async function getAvailableSlotsForEmployee(employee, date, serviceDuration) {
+async function getAvailableSlotsForEmployee(employee, date, serviceDuration, { excludeId } = {}) {
   const dayOfWeek = date.getDay();
   const hours     = getHoursForDay(employee.id, dayOfWeek);
   if (!hours) return [];
@@ -218,20 +346,46 @@ async function getAvailableSlotsForEmployee(employee, date, serviceDuration) {
   const booked = db.appointments.find(a =>
     (a.start_time||'').startsWith(dateStr) &&
     String(a.employee_id) === String(employee.id) &&
-    a.status !== 'cancelled'
+    a.status !== 'cancelled' &&
+    (!excludeId || String(a.id) !== String(excludeId))   // skip the appt being rescheduled
   );
 
-  // ── Google Calendar conflicts (manual entries, blocked time, etc.) ────────────
-  // Use the employee's own calendar, or fall back to the global one from .env.
-  // If neither is configured (or both are 'primary'), skip — fail open.
-  const calId = employee.google_calendar_id ||
-    (process.env.GOOGLE_CALENDAR_ID !== 'primary' ? process.env.GOOGLE_CALENDAR_ID : null);
-  const calEvents = await listEvents(calId, dateStr);
+  // ── Blocked date / time-off checks ───────────────────────────────────────────
+  // Shop-wide all-day closure?
+  if (db.blockedDates.findOne(b => b.date === dateStr && b.employee_id === null && b.all_day))
+    return [];
+  // Barber all-day off?
+  if (db.blockedDates.findOne(b => b.date === dateStr && String(b.employee_id) === String(employee.id) && b.all_day))
+    return [];
+
+  // ── Google Calendar conflicts (personal blocks on the barber's own calendar) ──
+  // IMPORTANT: only use the employee's OWN calendar here — never the shop-wide
+  // fallback. The shop calendar holds every barber's appointments mixed together,
+  // so querying it per-employee would block all barbers whenever any one of them
+  // is booked. The DB check above already handles per-barber conflicts correctly;
+  // the calendar check exists only to catch personal blocks the barber adds
+  // manually (days off, personal appointments, etc.).
+  const calId     = employee.google_calendar_id || null;
+  const calEvents = calId ? await listEvents(calId, dateStr) : [];
+
+  // ── Partial time blocks (shop-wide or barber-specific) ───────────────────────
+  const timeBlocks = db.blockedDates.find(b =>
+    b.date === dateStr && !b.all_day &&
+    (b.employee_id === null || String(b.employee_id) === String(employee.id)) &&
+    b.start_time && b.end_time
+  ).map(b => {
+    const [sh, sm] = b.start_time.split(':').map(Number);
+    const [eh, em] = b.end_time.split(':').map(Number);
+    const s = new Date(date); s.setHours(sh, sm, 0, 0);
+    const e = new Date(date); e.setHours(eh, em, 0, 0);
+    return { start: s, end: e };
+  });
 
   // ── Merge and filter ──────────────────────────────────────────────────────────
   const busy = [
     ...booked.map(b => ({ start: new Date(b.start_time), end: new Date(b.end_time) })),
     ...calEvents,
+    ...timeBlocks,
   ];
 
   return allSlots.filter(slot => !busy.some(b => slot.start < b.end && slot.end > b.start));
@@ -251,6 +405,60 @@ async function getAvailableSlotsForAny(employees, date, serviceDuration) {
   return [...map.values()].sort((a,b) => a.start - b.start);
 }
 
+/**
+ * Returns time slots where at least min(groupSize, employees.length) barbers
+ * are simultaneously free.
+ *
+ * Each slot includes:
+ *   - availableEmployees : employee IDs free for the main block
+ *   - mainCount          : how many people we serve in this slot
+ *   - overflowCount      : how many need a follow-up slot (0 if no overflow)
+ *   - overflowSlot       : next available slot for overflow people, or null
+ *
+ * Overflow happens when groupSize > employees.length.
+ * Example: 3 people, 2 barbers → mainCount=2, overflowCount=1,
+ *   overflowSlot = first slot at/after this slot's end where ≥1 barber is free.
+ */
+async function getAvailableSlotsForGroup(employees, date, duration, groupSize) {
+  // Collect per-employee free slots in parallel
+  const slotsByEmp = await Promise.all(
+    employees.map(emp => getAvailableSlotsForEmployee(emp, date, duration))
+  );
+
+  // Build a union map: timeKey → { ...slot, availableEmployees: [id, ...] }
+  const map = new Map();
+  employees.forEach((emp, i) => {
+    for (const slot of slotsByEmp[i]) {
+      if (map.has(slot.time)) {
+        map.get(slot.time).availableEmployees.push(emp.id);
+      } else {
+        map.set(slot.time, { ...slot, availableEmployees: [emp.id] });
+      }
+    }
+  });
+
+  const allSlots      = [...map.values()].sort((a, b) => a.start - b.start);
+  const maxConcurrent = employees.length;
+  const mainCount     = Math.min(groupSize, maxConcurrent);
+  const overflowCount = Math.max(0, groupSize - maxConcurrent);
+
+  // Only slots where at least mainCount barbers are simultaneously free
+  const mainSlots = allSlots.filter(s => s.availableEmployees.length >= mainCount);
+
+  return mainSlots.map(slot => {
+    // For overflow: find earliest slot starting at/after this slot's end
+    // where at least overflowCount barbers are free.
+    // (The main-slot barbers finish at slot.end and are free again — they'll
+    //  appear in overflowSlot.availableEmployees if no other booking conflicts.)
+    const overflowSlot = overflowCount > 0
+      ? (allSlots.find(s =>
+          s.start >= slot.end && s.availableEmployees.length >= overflowCount
+        ) || null)
+      : null;
+    return { ...slot, mainCount, overflowCount, overflowSlot };
+  });
+}
+
 function pickLeastBusyEmployee(employeeIds, dateStr) {
   const counts = employeeIds.map(id => ({
     id,
@@ -264,18 +472,28 @@ function pickLeastBusyEmployee(employeeIds, dateStr) {
   return counts[0].id;
 }
 
-function getAvailableDates(employees, daysAhead, limit = 7) {
-  const ahead = daysAhead || parseInt(getSetting('booking_days_ahead')) || 14;
+function getAvailableDates(employees, daysAhead, limit = 20) {
+  const ahead = daysAhead || parseInt(getSetting('booking_days_ahead')) || 20;
   const dates = [];
   const today = new Date();
   for (let i = 1; i <= ahead && dates.length < limit; i++) {
     const d = new Date(today);
     d.setDate(today.getDate() + i);
     d.setHours(0, 0, 0, 0);
-    const dow = d.getDay();
+    const dow     = d.getDay();
+    const dateStr = _dateStr(d);
+
+    // Skip dates blocked for the whole shop
+    if (db.blockedDates.findOne(b => b.date === dateStr && b.employee_id === null && b.all_day))
+      continue;
+
+    // At least one employee must have open hours AND not be blocked all day
     const anyOpen = employees.length === 0
       ? !!getHoursForDay(null, dow)
-      : employees.some(e => !!getHoursForDay(e.id, dow));
+      : employees.some(e =>
+          !!getHoursForDay(e.id, dow) &&
+          !db.blockedDates.findOne(b => b.date === dateStr && String(b.employee_id) === String(e.id) && b.all_day)
+        );
     if (anyOpen) {
       dates.push({
         date: d,
@@ -299,10 +517,15 @@ function _toAmPm(h, m)  {
 
 module.exports = {
   getSetting, setSetting, getAllSettings, setManySettings,
-  getEmployees, getActiveEmployees, getEmployee, createEmployee, updateEmployee, toggleEmployee,
+  getEmployees, getActiveEmployees, getEmployee, getEmployeesForService, createEmployee, updateEmployee, toggleEmployee,
+  isEmployeeAwayToday, toggleEmployeeAwayToday,
   getHoursForDay, getWeeklyHours, setWeeklyHours,
   getActiveServices, getAllServices, getService, upsertService, toggleService, deleteService,
   getBotMessages, getBotMessage, setBotMessage, setManyMessages,
-  getAppointments, getTodayAppointments, getDashboardStats, createAppointment, updateAppointment,
-  getAvailableSlotsForEmployee, getAvailableSlotsForAny, pickLeastBusyEmployee, getAvailableDates,
+  getAppointments, getTodayAppointments, getDashboardStats,
+  createAppointment, updateAppointment,
+  getAppointmentByCode, getAppointmentById, cancelAppointment, rescheduleAppointment, isNewCustomer,
+  getUnsurveyedAppointments, markSurveySent, saveRating,
+  getAvailableSlotsForEmployee, getAvailableSlotsForAny, getAvailableSlotsForGroup, pickLeastBusyEmployee, getAvailableDates,
+  getBlocks, addBlock, deleteBlock,
 };

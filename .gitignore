@@ -11,6 +11,11 @@ node_modules/
 # Google credentials (NEVER commit these)
 credentials/*.json
 credentials/*.pem
+*service_account*.json
+*service-account*.json
+
+# Local Claude settings
+.claude/settings.local.json
 
 # Logs
 logs/

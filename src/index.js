@@ -9,6 +9,8 @@ const qrcodeTerminal       = require('qrcode-terminal');
 const QRCode               = require('qrcode');
 const { createBot }             = require('./bot');
 const { handleMessage }         = require('./handlers/conversationHandler');
+const { startSurveyScheduler }  = require('./services/surveyScheduler');
+const chatPause                 = require('./utils/chatPause');
 const { createServer }          = require('./web/server');
 const q                         = require('./db/queries');
 const { update: waUpdate }      = require('./whatsapp-state');
@@ -72,6 +74,27 @@ client.on('ready', () => {
   console.log(`   Bot paused     : ${q.getSetting('bot_paused') === '1' ? 'YES ⚠️' : 'no'}`);
   console.log('');
   waUpdate({ status: 'ready', qrDataUrl: null });
+  startSurveyScheduler(client);
+});
+
+// ── Human takeover — detect outgoing keyword messages ────────────────────────
+client.on('message_create', async (msg) => {
+  if (!msg.fromMe) return; // only care about messages the barber sends
+  if (msg.to.endsWith('@g.us')) return; // ignore groups
+
+  const body       = (msg.body || '').trim();
+  const takeoverKw = (q.getSetting('takeover_keyword') || '#human').trim();
+  const releaseKw  = (q.getSetting('release_keyword')  || '#bot').trim();
+
+  if (body.toLowerCase() === takeoverKw.toLowerCase()) {
+    chatPause.pauseChat(msg.to);
+    console.log(`👤 Human takeover activated for ${msg.to}`);
+    try { await msg.delete(true); } catch (e) { /* ignore if delete fails */ }
+  } else if (body.toLowerCase() === releaseKw.toLowerCase()) {
+    chatPause.resumeChat(msg.to);
+    console.log(`🤖 Bot resumed for ${msg.to}`);
+    try { await msg.delete(true); } catch (e) { /* ignore if delete fails */ }
+  }
 });
 
 client.on('message', async (msg) => {
@@ -86,7 +109,34 @@ client.on('message', async (msg) => {
 
   try {
     const reply = await handleMessage(msg);
-    if (reply) await msg.reply(reply);
+    if (!reply) return;
+
+    if (typeof reply === 'string') {
+      // Plain text reply
+      await msg.reply(reply);
+    } else {
+      // Rich reply: { text, ics, filename }
+      if (reply.text) await msg.reply(reply.text);
+
+      // ICS calendar attachment — isolated try-catch so a send failure
+      // never replaces the booking confirmation the user already received.
+      if (reply.ics) {
+        try {
+          const { MessageMedia } = require('whatsapp-web.js');
+          const media = new MessageMedia(
+            'text/calendar',
+            Buffer.from(reply.ics, 'utf8').toString('base64'),
+            reply.filename || 'appointment.ics'
+          );
+          await client.sendMessage(msg.from, media);
+          console.log(`📆 ICS calendar file sent to ${msg.from}`);
+        } catch (icsErr) {
+          // WhatsApp may not support text/calendar — log but don't show error to customer.
+          // Their appointment is confirmed; they just won't get the .ics attachment.
+          console.error('⚠️  ICS attachment failed (booking still confirmed):', icsErr.message);
+        }
+      }
+    }
   } catch (err) {
     console.error('❌ Error handling message:', err);
     await msg.reply(`😔 Something went wrong. Please contact us at ${q.getSetting('shop_phone') || 'the shop'}.`);

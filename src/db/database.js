@@ -15,6 +15,7 @@ const db = {
   services:      new JsonCollection(path.join(DATA_DIR, 'services.json')),
   appointments:  new JsonCollection(path.join(DATA_DIR, 'appointments.json')),
   botMessages:   new JsonCollection(path.join(DATA_DIR, 'bot_messages.json')),
+  blockedDates:  new JsonCollection(path.join(DATA_DIR, 'blocked_dates.json')),
   settings:      new JsonKVStore(path.join(DATA_DIR, 'settings.json')),
 };
 
@@ -51,21 +52,44 @@ function seedIfEmpty() {
       { key: 'no_slots_message',     label: 'No Available Slots',        description: 'Shown when a chosen date has no open time slots.',                                    value: '😔 No open slots on that date. Please pick another day.' },
       { key: 'bot_paused_message',   label: 'Bot Paused Message',        description: 'Shown to all customers when the bot is paused from the dashboard.',                  value: '😊 We are currently unavailable via WhatsApp. Please call us at {shop_phone}.' },
       { key: 'select_employee_prompt', label: 'Select Barber Prompt',    description: 'Header shown before the list of available barbers.',                                  value: '💈 *Choose your barber:*' },
+      { key: 'reminder_message',      label: 'Appointment Reminder',     description: 'Sent to the customer X hours before their appointment. Placeholders: {customer_name} {service_name} {barber_name} {date} {time} {booking_code} {shop_name} {shop_address}', value: "⏰ *Appointment Reminder*\n\nHi {customer_name}! 👋\n\nJust a reminder that you have an appointment at *{shop_name}*:\n\n✂️ Service : *{service_name}*\n💈 Barber  : *{barber_name}*\n📅 Date    : *{date}*\n⏰ Time    : *{time}*\n🎫 Code    : *{booking_code}*\n\n📍 {shop_address}\n\nSee you soon! 💈" },
     ].forEach(m => db.botMessages.insert(m));
   }
+
+  // Bot messages — ensure any newly-added keys exist in older databases
+  const newMessages = [
+    { key: 'reminder_message',      label: 'Appointment Reminder',       description: 'Sent to the customer X hours before their appointment. Placeholders: {customer_name} {service_name} {barber_name} {date} {time} {booking_code} {shop_name} {shop_address}', value: "⏰ *Appointment Reminder*\n\nHi {customer_name}! 👋\n\nJust a reminder that you have an appointment at *{shop_name}*:\n\n✂️ Service : *{service_name}*\n💈 Barber  : *{barber_name}*\n📅 Date    : *{date}*\n⏰ Time    : *{time}*\n🎫 Code    : *{booking_code}*\n\n📍 {shop_address}\n\nSee you soon! 💈" },
+    { key: 'new_customer_welcome',  label: 'New Customer Welcome',       description: 'Shown to first-time customers after they select a language. Use {shop_name} as a placeholder.', value: "🌟 *Welcome to {shop_name}!*\n\nWe're so glad you found us! As a first-time visitor, feel free to explore our services or jump straight into booking your first appointment. We look forward to meeting you! 💈" },
+    { key: 'survey_prompt',         label: 'Survey — Rating Request',    description: 'Sent after a completed appointment. Placeholders: {name} {service} {barber}', value: "⭐ *How was your visit today, {name}?*\n\n✂️ _{service} with {barber}_\n\n1️⃣ ⭐ Poor\n2️⃣ ⭐⭐ Fair\n3️⃣ ⭐⭐⭐ Good\n4️⃣ ⭐⭐⭐⭐ Great\n5️⃣ ⭐⭐⭐⭐⭐ Excellent!\n\n_Reply with a number 1–5_" },
+    { key: 'survey_thanks',         label: 'Survey — Thank You',         description: 'Sent after the customer submits their rating. Placeholders: {stars} {rating}', value: "🙏 *Thank you for your feedback!*\n\n{stars} ({rating}/5)\n\nWe appreciate it and look forward to seeing you again! 💈" },
+  ];
+  newMessages.forEach(m => {
+    if (!db.botMessages.findOne(r => r.key === m.key)) db.botMessages.insert(m);
+  });
 
   // Settings
   const settingDefaults = {
     bot_paused:           '0',
     allow_any_employee:   '1',
-    shop_name:            process.env.SHOP_NAME      || "Jayden's Barbershop",
-    shop_address:         process.env.SHOP_ADDRESS   || 'Paramaribo, Suriname',
-    shop_phone:           process.env.SHOP_PHONE     || '',
-    shop_email:           process.env.SHOP_EMAIL     || '',
-    shop_instagram:       process.env.SHOP_INSTAGRAM || '',
+    shop_name:            process.env.SHOP_NAME        || "Jayden's Barbershop",
+    shop_address:         process.env.SHOP_ADDRESS     || 'Paramaribo, Suriname',
+    shop_phone:           process.env.SHOP_PHONE       || '',
+    management_phone:     process.env.MANAGEMENT_PHONE || '',
+    shop_email:           process.env.SHOP_EMAIL       || '',
+    shop_instagram:       process.env.SHOP_INSTAGRAM   || '',
     google_maps_link:     process.env.GOOGLE_MAPS_LINK || '',
-    currency:             process.env.CURRENCY       || 'SRD',
-    timezone:             process.env.TIMEZONE       || 'America/Paramaribo',
+    currency:             process.env.CURRENCY         || 'SRD',
+    timezone:             process.env.TIMEZONE         || 'America/Paramaribo',
+    google_calendar_id:   process.env.GOOGLE_CALENDAR_ID !== 'primary' ? (process.env.GOOGLE_CALENDAR_ID || '') : '',
+    booking_days_ahead:   process.env.BOOKING_DAYS_AHEAD || '20',
+    reminder_enabled:     '0',
+    reminder_hours:       '24',
+    survey_enabled:       '0',
+    survey_delay_minutes: '30',
+    takeover_keyword:     '#human',
+    release_keyword:      '#bot',
+    cs_phone_1:           '',
+    cs_phone_2:           '',
   };
   Object.entries(settingDefaults).forEach(([k, v]) => {
     if (!db.settings.has(k)) db.settings.set(k, v);
@@ -73,6 +97,12 @@ function seedIfEmpty() {
 }
 
 seedIfEmpty();
+
+// ── One-time migrations ───────────────────────────────────────────────────────
+// Bump booking_days_ahead from old default (7 or 14) to 20
+const currentDaysAhead = parseInt(db.settings.get('booking_days_ahead'), 10) || 0;
+if (currentDaysAhead < 20) db.settings.set('booking_days_ahead', '20');
+
 console.log('✅ Database ready (JSON file store)');
 
 module.exports = db;

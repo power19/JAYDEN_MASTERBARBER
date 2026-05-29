@@ -66,6 +66,7 @@
       <button @click="nav('appointments')" :class="page==='appointments' ? 'active' : ''" class="sidebar-link w-full text-left">📅 Appointments</button>
       <button @click="nav('employees')"   :class="page==='employees'   ? 'active' : ''" class="sidebar-link w-full text-left">👥 Employees</button>
       <button @click="nav('hours')"       :class="page==='hours'       ? 'active' : ''" class="sidebar-link w-full text-left">⏰ Work Hours</button>
+      <button @click="nav('blocks')"      :class="page==='blocks'      ? 'active' : ''" class="sidebar-link w-full text-left">🚫 Closed Dates</button>
       <button @click="nav('services')"    :class="page==='services'    ? 'active' : ''" class="sidebar-link w-full text-left">✂️ Services</button>
       <button @click="nav('messages')"    :class="page==='messages'    ? 'active' : ''" class="sidebar-link w-full text-left">✉️ Bot Messages</button>
       <button @click="nav('settings')"    :class="page==='settings'    ? 'active' : ''" class="sidebar-link w-full text-left">⚙️ Settings</button>
@@ -126,14 +127,13 @@
           <!-- Left panel: QR image or state icon -->
           <div class="flex-shrink-0 rounded-xl border border-amber-200 bg-white overflow-hidden" style="width:176px;min-height:176px;display:flex;align-items:center;justify-content:center;">
 
-            <!-- QR image — x-for with qrNonce as key forces a full DOM remount each time a
-                 new QR arrives, guaranteeing the browser decodes and displays the fresh image -->
-            <template x-if="!!waStatus.qrDataUrl">
-              <template x-for="n in [qrNonce]" :key="n">
-                <img :src="waStatus.qrDataUrl"
-                     alt="WhatsApp QR code"
-                     style="width:176px;height:176px;display:block;">
-              </template>
+            <!-- QR image — served as PNG via /api/whatsapp/qr?t=<timestamp>.
+                 The ?t= cache-buster changes every time a new QR arrives so the
+                 browser is forced to fetch the latest image (no Alpine tricks needed). -->
+            <template x-if="waStatus.status === 'qr'">
+              <img :src="'/api/whatsapp/qr?t=' + (waStatus.lastUpdated || Date.now())"
+                   alt="WhatsApp QR code"
+                   style="width:176px;height:176px;display:block;">
             </template>
 
             <!-- Spinner (initialising / authenticated) -->
@@ -187,7 +187,10 @@
 
       <!-- Today's schedule -->
       <div class="card">
-        <h3 class="text-lg font-bold text-slate-800 mb-4">📅 Today's Schedule</h3>
+        <div class="flex justify-between items-center mb-4">
+          <h3 class="text-lg font-bold text-slate-800">📅 Today's Schedule</h3>
+          <button @click="openWalkInModal()" class="btn-primary text-sm">👤 Walk-in</button>
+        </div>
         <div x-show="todayAppointments.length === 0" class="text-slate-400 text-center py-8">No appointments today</div>
         <div class="space-y-3">
           <template x-for="a in todayAppointments" :key="a.id">
@@ -200,6 +203,7 @@
                   <span class="text-xs font-mono text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded" x-text="'#' + (a.booking_code || '?')"></span>
                 </div>
                 <div class="text-slate-500 text-xs" x-text="`${a.service_emoji} ${a.service_name} · ${a.employee_name || 'Unassigned'}`"></div>
+                <div x-show="a.customer_phone" class="text-slate-400 text-xs mt-0.5" x-text="'📱 ' + (a.customer_phone || '').replace(/@\S+$/, '')"></div>
               </div>
               <div>
                 <span class="badge" :class="statusBadge(a.status)" x-text="a.status"></span>
@@ -212,11 +216,32 @@
           </template>
         </div>
       </div>
+      <!-- Human Takeover panel — shown when any chats are paused -->
+      <div x-show="pausedChats.length > 0" class="card border-blue-200 bg-blue-50 mt-6">
+        <div class="flex items-center gap-2 mb-3">
+          <span class="text-blue-600 font-bold">👤 Human Takeover Active</span>
+          <span class="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-semibold" x-text="pausedChats.length + ' chat(s)'"></span>
+        </div>
+        <div class="space-y-2">
+          <template x-for="c in pausedChats" :key="c.chatId">
+            <div class="flex items-center justify-between bg-white rounded-xl px-4 py-2 border border-blue-100">
+              <div>
+                <span class="font-mono text-sm text-slate-700" x-text="'📱 ' + c.phone"></span>
+                <span class="text-xs text-slate-400 ml-2" x-text="'since ' + new Date(c.since).toLocaleTimeString()"></span>
+              </div>
+              <button @click="releaseChat(c.chatId)" class="btn-primary text-xs py-1 px-3">🤖 Release to Bot</button>
+            </div>
+          </template>
+        </div>
+      </div>
     </div>
 
     <!-- ── APPOINTMENTS ──────────────────────────────────────────── -->
     <div x-show="page === 'appointments'" class="p-8">
-      <h2 class="text-2xl font-bold text-slate-800 mb-6">Appointments</h2>
+      <div class="flex justify-between items-center mb-6">
+        <h2 class="text-2xl font-bold text-slate-800">Appointments</h2>
+        <button @click="openNewApptModal()" class="btn-primary">+ New Appointment</button>
+      </div>
 
       <!-- Filters -->
       <div class="card mb-6">
@@ -261,6 +286,7 @@
                 <th class="pb-3 text-slate-500 font-medium">Service</th>
                 <th class="pb-3 text-slate-500 font-medium">Barber</th>
                 <th class="pb-3 text-slate-500 font-medium">Price</th>
+                <th class="pb-3 text-slate-500 font-medium">Rating</th>
                 <th class="pb-3 text-slate-500 font-medium">Status</th>
                 <th class="pb-3 text-slate-500 font-medium">Actions</th>
               </tr>
@@ -272,6 +298,7 @@
                   <td class="py-3">
                     <div class="font-medium text-slate-800" x-text="a.customer_name"></div>
                     <div class="text-slate-400 text-xs font-mono tracking-widest" x-text="'#' + (a.booking_code || '—')"></div>
+                    <div x-show="a.customer_phone" class="text-slate-400 text-xs mt-0.5" x-text="'📱 ' + (a.customer_phone || '').replace(/@\S+$/, '')"></div>
                   </td>
                   <td class="py-3" x-text="`${a.service_emoji} ${a.service_name}`"></td>
                   <td class="py-3">
@@ -281,15 +308,33 @@
                     </div>
                   </td>
                   <td class="py-3" x-text="`${settings.currency} ${a.service_price}`"></td>
+                  <td class="py-3 text-sm">
+                    <span x-show="a.rating" x-text="'⭐'.repeat(a.rating) + ' (' + a.rating + '/5)'"></span>
+                    <span x-show="!a.rating" class="text-slate-300 text-xs">—</span>
+                  </td>
                   <td class="py-3"><span class="badge" :class="statusBadge(a.status)" x-text="a.status"></span></td>
                   <td class="py-3">
-                    <select @change="markStatus(a.id, $event.target.value); $event.target.value=''" class="input py-1 text-xs w-32">
-                      <option value="">Change status…</option>
-                      <option value="confirmed">Confirmed</option>
-                      <option value="completed">Completed</option>
-                      <option value="no-show">No-Show</option>
-                      <option value="cancelled">Cancelled</option>
-                    </select>
+                    <div class="flex items-center gap-2">
+                      <select @change="markStatus(a.id, $event.target.value); $event.target.value=''" class="input py-1 text-xs w-32">
+                        <option value="">Change status…</option>
+                        <option value="confirmed">Confirmed</option>
+                        <option value="completed">Completed</option>
+                        <option value="no-show">No-Show</option>
+                        <option value="cancelled">Cancelled</option>
+                      </select>
+                      <!-- Sync to Google Calendar — shown when event is missing -->
+                      <button x-show="!a.google_event_id && a.status !== 'cancelled'"
+                        @click="syncToCalendar(a)"
+                        title="Sync to Google Calendar"
+                        class="text-slate-400 hover:text-amber-500 transition text-lg leading-none"
+                        style="font-size:1.1rem">📅</button>
+                      <!-- Link to existing calendar event -->
+                      <a x-show="!!a.google_event_id"
+                        x-bind:href="a.google_event_link || 'https://calendar.google.com'"
+                        target="_blank"
+                        title="View in Google Calendar"
+                        class="text-emerald-500 hover:text-emerald-600 transition text-lg leading-none">✅</a>
+                    </div>
                   </td>
                 </tr>
               </template>
@@ -299,6 +344,201 @@
       </div>
     </div>
 
+    <!-- ── NEW APPOINTMENT MODAL ───────────────────────────────────── -->
+    <template x-if="showNewApptModal">
+      <div class="fixed inset-0 z-50 flex items-center justify-center p-4" style="background:rgba(0,0,0,0.4)">
+        <div class="bg-white rounded-2xl shadow-xl w-full max-w-4xl flex overflow-hidden" style="max-height:90vh" @click.stop>
+
+          <!-- LEFT: Form -->
+          <form @submit.prevent="saveNewAppt()" class="flex flex-col flex-1 p-8 overflow-y-auto">
+            <h3 class="text-xl font-bold text-slate-800 mb-6">New Appointment</h3>
+            <div class="space-y-4 flex-1">
+              <div>
+                <label class="label">Customer Name *</label>
+                <input type="text" x-model="newApptForm.customer_name" class="input w-full" required placeholder="e.g. John Smith">
+              </div>
+              <div>
+                <label class="label">Phone Number *</label>
+                <input type="text" x-model="newApptForm.customer_phone" class="input w-full" required placeholder="e.g. 5978001234">
+              </div>
+              <div>
+                <label class="label">Service *</label>
+                <select x-model="newApptForm.service_id" @change="onNewApptServiceChange()" class="input w-full" required>
+                  <option value="">Select a service…</option>
+                  <template x-for="s in services.filter(s=>s.is_active)" :key="s.id">
+                    <option :value="s.id" x-text="`${s.emoji} ${s.name} (${settings.currency} ${s.price}, ${s.duration} min)`"></option>
+                  </template>
+                </select>
+              </div>
+              <div>
+                <label class="label">Barber *</label>
+                <div x-show="!newApptForm.service_id" class="text-slate-400 text-sm py-2">Select a service first</div>
+                <template x-if="newApptForm.service_id">
+                  <div>
+                    <select x-model="newApptForm.employee_id" @change="onNewApptServiceChange()" class="input w-full" required>
+                      <option value="">Select a barber…</option>
+                      <template x-for="e in employeesForService(newApptForm.service_id)" :key="e.id">
+                        <option :value="e.id" x-text="e.name"></option>
+                      </template>
+                    </select>
+                    <p class="text-xs text-slate-400 mt-1"
+                       x-show="employeesForService(newApptForm.service_id).length === 0"
+                       class="text-amber-600">⚠️ No barbers available for this service.</p>
+                  </div>
+                </template>
+              </div>
+              <div>
+                <label class="label">Date *</label>
+                <input type="date" x-model="newApptForm.date" @change="onNewApptServiceChange()" :min="new Date().toISOString().slice(0,10)" class="input w-full" required>
+              </div>
+              <div>
+                <label class="label">Time *</label>
+                <div x-show="!newApptForm.service_id || !newApptForm.employee_id || !newApptForm.date"
+                  class="text-slate-400 text-sm py-2">Select a service, barber and date first</div>
+                <div x-show="newApptForm.service_id && newApptForm.employee_id && newApptForm.date">
+                  <div x-show="newApptSlotsLoading" class="text-slate-400 text-sm py-2">Loading available slots…</div>
+                  <select x-show="!newApptSlotsLoading && newApptSlots.length > 0"
+                    x-model="newApptForm.time" class="input w-full">
+                    <option value="">Pick a time…</option>
+                    <template x-for="slot in newApptSlots" :key="slot">
+                      <option :value="slot" x-text="slot"></option>
+                    </template>
+                  </select>
+                  <div x-show="!newApptSlotsLoading && newApptSlots.length === 0"
+                    class="text-amber-600 text-sm py-2">⚠️ No available slots for this barber on that date.</div>
+                </div>
+              </div>
+              <div>
+                <label class="label">Notes</label>
+                <input type="text" x-model="newApptForm.notes" class="input w-full" placeholder="Optional notes…">
+              </div>
+            </div>
+            <div x-show="newApptError" class="text-red-500 text-sm mt-4" x-text="newApptError"></div>
+            <div class="flex gap-3 justify-end mt-6">
+              <button type="button" @click="showNewApptModal=false" class="btn-secondary">Cancel</button>
+              <button type="submit" :disabled="newApptSaving" class="btn-primary">
+                <span x-show="!newApptSaving">Save & Sync to Calendar</span>
+                <span x-show="newApptSaving">Saving…</span>
+              </button>
+            </div>
+          </form>
+
+          <!-- RIGHT: Barber schedule for selected date -->
+          <div class="w-72 bg-slate-50 border-l border-slate-200 flex flex-col flex-shrink-0">
+            <div class="px-5 py-5 border-b border-slate-200">
+              <div class="font-semibold text-slate-700 text-sm">
+                <span x-show="!newApptForm.employee_id || !newApptForm.date" class="text-slate-400">Pick a barber &amp; date to see their schedule</span>
+                <template x-if="newApptForm.employee_id && newApptForm.date">
+                  <span>
+                    📅 <span x-text="employees.find(e=>String(e.id)===String(newApptForm.employee_id))?.name || ''"></span>
+                    — <span x-text="new Date(newApptForm.date+'T12:00:00').toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'})"></span>
+                  </span>
+                </template>
+              </div>
+            </div>
+            <div class="flex-1 overflow-y-auto px-5 py-4">
+              <!-- Loading -->
+              <div x-show="newApptScheduleLoading" class="text-slate-400 text-sm text-center py-8">Loading…</div>
+              <!-- No barber/date selected -->
+              <div x-show="!newApptForm.employee_id || !newApptForm.date" class="text-center py-12">
+                <div class="text-3xl mb-2">🗓️</div>
+                <div class="text-slate-400 text-xs">Schedule appears here</div>
+              </div>
+              <!-- Schedule loaded -->
+              <template x-if="!newApptScheduleLoading && newApptForm.employee_id && newApptForm.date">
+                <div>
+                  <div x-show="newApptDaySchedule.length === 0" class="text-center py-8">
+                    <div class="text-2xl mb-2">✨</div>
+                    <div class="text-slate-400 text-xs">No bookings yet — day is open</div>
+                  </div>
+                  <div class="space-y-2">
+                    <template x-for="appt in newApptDaySchedule" :key="appt.id">
+                      <div class="bg-white rounded-xl p-3 border border-slate-200 text-xs">
+                        <div class="flex items-center gap-2 mb-1">
+                          <div class="w-2 h-2 rounded-full flex-shrink-0" :style="`background:${employees.find(e=>String(e.id)===String(appt.employee_id))?.color||'#94a3b8'}`"></div>
+                          <span class="font-semibold text-slate-700" x-text="fmtTime(appt.start_time) + ' – ' + fmtTime(appt.end_time)"></span>
+                        </div>
+                        <div class="text-slate-600 font-medium" x-text="appt.customer_name"></div>
+                        <div class="text-slate-400" x-text="`${appt.service_emoji} ${appt.service_name}`"></div>
+                        <div class="mt-1">
+                          <span class="badge text-xs" :class="statusBadge(appt.status)" x-text="appt.status"></span>
+                        </div>
+                      </div>
+                    </template>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </template>
+
+    <!-- ── WALK-IN MODAL ────────────────────────────────────────────── -->
+    <template x-if="showWalkInModal">
+      <div class="fixed inset-0 z-50 flex items-center justify-center p-4" style="background:rgba(0,0,0,0.4)">
+        <div class="bg-white rounded-2xl shadow-xl w-full max-w-md p-8" @click.stop>
+          <h3 class="text-xl font-bold text-slate-800 mb-6">👤 Register Walk-in</h3>
+          <div class="space-y-4">
+            <!-- Service -->
+            <div>
+              <label class="label">Service *</label>
+              <select x-model="walkInForm.service_id" @change="loadWalkInSlots()" class="input w-full">
+                <option value="">Select service…</option>
+                <template x-for="s in services.filter(s=>s.is_active)" :key="s.id">
+                  <option :value="s.id" x-text="`${s.emoji} ${s.name} (${s.duration} min)`"></option>
+                </template>
+              </select>
+            </div>
+            <!-- Barber -->
+            <div>
+              <label class="label">Barber *</label>
+              <select x-model="walkInForm.employee_id" @change="loadWalkInSlots()" class="input w-full" :disabled="!walkInForm.service_id">
+                <option value="">
+                  <span x-show="!walkInForm.service_id">Select a service first</span>
+                  <span x-show="walkInForm.service_id">Select barber…</span>
+                </option>
+                <template x-for="e in walkInEmployees()" :key="e.id">
+                  <option :value="e.id" x-text="e.name"></option>
+                </template>
+              </select>
+            </div>
+            <!-- Time slot -->
+            <div>
+              <label class="label">Time Slot *</label>
+              <div x-show="walkInSlotsLoading" class="text-slate-400 text-sm">Loading slots…</div>
+              <select x-show="!walkInSlotsLoading" x-model="walkInForm.time" class="input w-full" :disabled="walkInSlots.length === 0">
+                <option value="" x-text="walkInSlots.length === 0 ? (walkInForm.employee_id ? 'No slots available today' : 'Pick service & barber first') : 'Select time…'"></option>
+                <template x-for="s in walkInSlots" :key="s">
+                  <option :value="s" x-text="s"></option>
+                </template>
+              </select>
+            </div>
+            <!-- Customer name -->
+            <div>
+              <label class="label">Customer Name *</label>
+              <input type="text" x-model="walkInForm.customer_name" class="input w-full" placeholder="e.g. John">
+            </div>
+            <!-- Phone (optional) -->
+            <div>
+              <label class="label">Phone <span class="text-slate-400 font-normal">(optional)</span></label>
+              <input type="text" x-model="walkInForm.customer_phone" class="input w-full" placeholder="e.g. 5978001234">
+            </div>
+            <!-- Error -->
+            <p x-show="walkInError" class="text-red-500 text-sm" x-text="walkInError"></p>
+          </div>
+          <div class="flex gap-3 mt-6">
+            <button @click="showWalkInModal=false" class="btn-secondary flex-1">Cancel</button>
+            <button @click="saveWalkIn()" :disabled="walkInSaving" class="btn-primary flex-1">
+              <span x-show="!walkInSaving">✅ Register Walk-in</span>
+              <span x-show="walkInSaving">Saving…</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </template>
+
     <!-- ── EMPLOYEES ─────────────────────────────────────────────── -->
     <div x-show="page === 'employees'" class="p-8">
       <div class="flex justify-between items-center mb-6">
@@ -306,44 +546,170 @@
         <button @click="openEmployeeModal()" class="btn-primary">+ Add Barber</button>
       </div>
 
-      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        <template x-for="e in employees" :key="e.id">
-          <div class="card">
-            <div class="flex items-start justify-between mb-4">
-              <div class="flex items-center gap-3">
-                <div class="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-lg"
-                     :style="`background:${e.color}`" x-text="e.name[0].toUpperCase()"></div>
-                <div>
-                  <div class="font-bold text-slate-800" x-text="e.name"></div>
-                  <span class="badge" :class="e.is_active ? 'badge-green' : 'badge-gray'"
-                        x-text="e.is_active ? 'Active' : 'Inactive'"></span>
-                </div>
-              </div>
-            </div>
-            <div class="text-sm text-slate-500 space-y-1 mb-4">
-              <div x-show="e.phone" x-text="`📱 ${e.phone}`"></div>
-              <div x-show="e.google_calendar_id" class="truncate text-xs" x-text="`📅 ${e.google_calendar_id}`"></div>
-            </div>
-            <div class="flex gap-2">
-              <button @click="openEmployeeModal(e)" class="btn-secondary flex-1 text-xs">✏️ Edit</button>
-              <button @click="nav('hours'); selectedHoursEmployee = e.id; loadHours()"
-                      class="btn-secondary flex-1 text-xs">⏰ Hours</button>
-              <button @click="toggleEmployee(e.id)"
-                      :class="e.is_active ? 'btn-danger' : 'btn-primary'"
-                      class="flex-1 text-xs px-2 py-2 rounded-xl font-semibold transition text-sm"
-                      x-text="e.is_active ? 'Deactivate' : 'Activate'"></button>
-            </div>
-          </div>
-        </template>
-        <div x-show="employees.length === 0" class="col-span-3 card text-center text-slate-400 py-12">
+      <div class="card p-0 overflow-hidden">
+        <div x-show="employees.length === 0" class="text-center text-slate-400 py-12">
           No employees yet. Click "Add Barber" to get started.
         </div>
+        <table x-show="employees.length > 0" class="w-full text-sm">
+          <thead>
+            <tr class="border-b border-slate-100 bg-slate-50">
+              <th class="text-left px-6 py-3 text-slate-500 font-medium">Barber</th>
+              <th class="text-left px-6 py-3 text-slate-500 font-medium">Phone</th>
+              <th class="text-left px-6 py-3 text-slate-500 font-medium">Calendar</th>
+              <th class="text-left px-6 py-3 text-slate-500 font-medium">Status</th>
+              <th class="text-left px-6 py-3 text-slate-500 font-medium">Actions</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100">
+            <template x-for="e in employees" :key="e.id">
+              <tr class="hover:bg-slate-50 transition">
+                <td class="px-6 py-4">
+                  <div class="flex items-center gap-3">
+                    <div class="w-9 h-9 rounded-full flex items-center justify-center text-white font-bold flex-shrink-0"
+                         :style="`background:${e.color}`" x-text="e.name[0].toUpperCase()"></div>
+                    <span class="font-semibold text-slate-800" x-text="e.name"></span>
+                  </div>
+                </td>
+                <td class="px-6 py-4 text-slate-500" x-text="e.phone || '—'"></td>
+                <td class="px-6 py-4">
+                  <span x-show="!e.google_calendar_id" class="text-slate-300">—</span>
+                  <span x-show="!!e.google_calendar_id"
+                    class="inline-flex items-center gap-1 text-xs bg-emerald-50 text-emerald-700 px-2 py-1 rounded-lg font-mono"
+                    x-text="e.google_calendar_id"></span>
+                </td>
+                <td class="px-6 py-4">
+                  <div class="flex items-center gap-2 flex-wrap">
+                    <span class="badge" :class="e.is_active ? 'badge-green' : 'badge-gray'"
+                          x-text="e.is_active ? 'Active' : 'Inactive'"></span>
+                    <span x-show="e.isAwayToday"
+                          class="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">
+                      🚫 Away Today
+                    </span>
+                  </div>
+                </td>
+                <td class="px-6 py-4">
+                  <div class="flex items-center gap-2 flex-wrap">
+                    <button @click="openEmployeeModal(e)" class="btn-secondary text-xs py-1 px-3">✏️ Edit</button>
+                    <button @click="openScheduleModal(e)" class="btn-secondary text-xs py-1 px-3">📋 Schedule</button>
+                    <button @click="nav('hours'); selectedHoursEmployee = e.id; loadHours()"
+                            class="btn-secondary text-xs py-1 px-3">⏰ Hours</button>
+                    <button @click="toggleAwayToday(e.id)"
+                            :class="e.isAwayToday ? 'bg-amber-500 text-white' : 'btn-secondary'"
+                            class="text-xs py-1 px-3 rounded-xl font-semibold transition"
+                            x-text="e.isAwayToday ? '✅ Back Today' : '🚫 Away Today'"></button>
+                    <button @click="toggleEmployee(e.id)"
+                            :class="e.is_active ? 'btn-danger' : 'btn-primary'"
+                            class="text-xs py-1 px-3 rounded-xl font-semibold transition"
+                            x-text="e.is_active ? 'Deactivate' : 'Activate'"></button>
+                  </div>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
       </div>
     </div>
 
+    <!-- ── EMPLOYEE SCHEDULE MODAL ─────────────────────────────────── -->
+    <template x-if="showScheduleModal">
+      <div class="fixed inset-0 z-50 flex items-center justify-center p-4" style="background:rgba(0,0,0,0.4)">
+        <div class="bg-white rounded-2xl shadow-xl w-full max-w-lg flex flex-col" style="max-height:88vh" @click.stop>
+
+          <!-- Header -->
+          <div class="flex items-center justify-between px-6 py-5 border-b border-slate-100">
+            <div class="flex items-center gap-3">
+              <div class="w-9 h-9 rounded-full flex items-center justify-center text-white font-bold flex-shrink-0"
+                   :style="`background:${scheduleEmployee?.color}`"
+                   x-text="scheduleEmployee?.name[0].toUpperCase()"></div>
+              <div>
+                <div class="font-bold text-slate-800" x-text="scheduleEmployee?.name"></div>
+                <div class="text-xs text-slate-400">Schedule</div>
+              </div>
+            </div>
+            <button @click="showScheduleModal=false" class="text-slate-400 hover:text-slate-600 text-xl leading-none">✕</button>
+          </div>
+
+          <!-- Date nav -->
+          <div class="flex items-center justify-between px-6 py-3 border-b border-slate-100 bg-slate-50">
+            <button @click="scheduleChangeDay(-1)" class="btn-secondary text-xs py-1 px-3">← Prev</button>
+            <div class="text-center">
+              <div class="font-semibold text-slate-800"
+                   x-text="new Date(scheduleDate+'T12:00:00').toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'})"></div>
+              <button @click="scheduleDate=new Date().toISOString().slice(0,10); loadSchedule()"
+                      class="text-xs text-amber-500 hover:underline">Today</button>
+            </div>
+            <button @click="scheduleChangeDay(1)" class="btn-secondary text-xs py-1 px-3">Next →</button>
+          </div>
+
+          <!-- Body -->
+          <div class="flex-1 overflow-y-auto px-6 py-5">
+            <div x-show="scheduleLoading" class="text-center text-slate-400 py-12">Loading…</div>
+            <template x-if="!scheduleLoading">
+              <div>
+                <!-- Empty state -->
+                <div x-show="scheduleDayAppts.length === 0" class="text-center py-12">
+                  <div class="text-4xl mb-3">✨</div>
+                  <div class="text-slate-500 font-medium">No appointments this day</div>
+                  <div class="text-slate-400 text-sm mt-1">The barber is available all day</div>
+                </div>
+                <!-- Appointment list -->
+                <div class="space-y-3">
+                  <template x-for="a in scheduleDayAppts" :key="a.id">
+                    <div class="flex gap-4 p-4 rounded-xl border border-slate-100 hover:border-slate-200 hover:bg-slate-50 transition">
+                      <!-- Time column -->
+                      <div class="flex-shrink-0 text-right w-20">
+                        <div class="font-mono font-bold text-slate-700 text-sm" x-text="fmtTime(a.start_time)"></div>
+                        <div class="font-mono text-slate-400 text-xs" x-text="fmtTime(a.end_time)"></div>
+                        <div class="text-xs text-slate-400 mt-1" x-text="a.service_duration + ' min'"></div>
+                      </div>
+                      <!-- Divider bar -->
+                      <div class="w-1 rounded-full flex-shrink-0" :style="`background:${scheduleEmployee?.color}`"></div>
+                      <!-- Details -->
+                      <div class="flex-1 min-w-0">
+                        <div class="font-semibold text-slate-800" x-text="a.customer_name"></div>
+                        <div class="text-slate-500 text-sm" x-text="`${a.service_emoji} ${a.service_name}`"></div>
+                        <div class="flex items-center gap-2 mt-2">
+                          <span class="badge text-xs" :class="statusBadge(a.status)" x-text="a.status"></span>
+                          <span class="text-slate-300 text-xs font-mono" x-text="'#' + a.booking_code"></span>
+                        </div>
+                      </div>
+                    </div>
+                  </template>
+                </div>
+              </div>
+            </template>
+          </div>
+
+          <!-- Footer summary -->
+          <div x-show="scheduleDayAppts.length > 0 && !scheduleLoading"
+               class="px-6 py-3 border-t border-slate-100 bg-slate-50 text-xs text-slate-500 flex gap-4">
+            <span x-text="`${scheduleDayAppts.length} appointment${scheduleDayAppts.length !== 1 ? 's' : ''}`"></span>
+            <span x-text="`${scheduleDayAppts.reduce((s,a)=>s+a.service_duration,0)} min total`"></span>
+          </div>
+        </div>
+      </div>
+    </template>
+
     <!-- ── WORK HOURS ─────────────────────────────────────────────── -->
     <div x-show="page === 'hours'" class="p-8">
-      <h2 class="text-2xl font-bold text-slate-800 mb-6">Work Hours</h2>
+      <div class="mb-6">
+        <h2 class="text-2xl font-bold text-slate-800">Work Hours</h2>
+        <!-- Active label -->
+        <div class="flex items-center gap-2 mt-1">
+          <span class="text-sm text-slate-400">Editing:</span>
+          <template x-if="selectedHoursEmployee === null">
+            <span class="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-600 bg-slate-100 px-3 py-0.5 rounded-full">
+              🌐 Global Default
+            </span>
+          </template>
+          <template x-if="selectedHoursEmployee !== null">
+            <span class="inline-flex items-center gap-2 text-sm font-semibold px-3 py-0.5 rounded-full text-white"
+              :style="`background:${employees.find(e=>String(e.id)===String(selectedHoursEmployee))?.color||'#94a3b8'}`"
+              x-text="employees.find(e=>String(e.id)===String(selectedHoursEmployee))?.name || 'Barber'">
+            </span>
+          </template>
+        </div>
+      </div>
 
       <!-- Employee tabs -->
       <div class="flex gap-2 mb-6 flex-wrap">
@@ -362,7 +728,10 @@
         <p class="text-slate-500 text-sm mb-6" x-show="selectedHoursEmployee === null">
           Global hours are used as the default for all barbers. Override per barber using the tabs above.
         </p>
-        <div class="space-y-3">
+        <!-- Loading state -->
+        <div x-show="hoursLoading" class="py-8 text-center text-slate-400 text-sm">⏳ Loading hours…</div>
+
+        <div x-show="!hoursLoading" class="space-y-3">
           <template x-for="(h, idx) in weeklyHours" :key="h.day_of_week">
             <div class="flex items-center gap-4 p-3 rounded-xl hover:bg-slate-50">
               <div class="w-28 text-sm font-medium text-slate-700"
@@ -427,6 +796,107 @@
       </div>
     </div>
 
+    <!-- ── CLOSED DATES ───────────────────────────────────────────── -->
+    <div x-show="page === 'blocks'" class="p-8">
+      <h2 class="text-2xl font-bold text-slate-800 mb-6">🚫 Closed Dates & Time-Off</h2>
+
+      <!-- Add block form -->
+      <div class="card mb-6">
+        <h3 class="font-semibold text-slate-700 mb-4">Add Closure / Time Block</h3>
+        <div class="grid grid-cols-2 gap-4 mb-4">
+          <div>
+            <label class="label">Date *</label>
+            <input type="date" x-model="blockForm.date" class="input w-full">
+          </div>
+          <div>
+            <label class="label">Applies To</label>
+            <select x-model="blockForm.employee_id" class="input w-full">
+              <option value="">🏪 Entire Shop (all barbers)</option>
+              <template x-for="e in employees" :key="e.id">
+                <option :value="e.id" x-text="e.name"></option>
+              </template>
+            </select>
+          </div>
+          <div>
+            <label class="label">Type</label>
+            <select x-model="blockForm.all_day" class="input w-full">
+              <option value="1">🗓️ Full Day Off / Shop Closed</option>
+              <option value="0">⏱️ Specific Time Range</option>
+            </select>
+          </div>
+          <div>
+            <label class="label">Reason (optional)</label>
+            <input type="text" x-model="blockForm.reason" class="input w-full" placeholder="e.g. National Holiday, Lunch, Training">
+          </div>
+          <template x-if="blockForm.all_day == '0'">
+            <div class="col-span-2 grid grid-cols-2 gap-4">
+              <div>
+                <label class="label">From</label>
+                <input type="time" x-model="blockForm.start_time" class="input w-full">
+              </div>
+              <div>
+                <label class="label">Until</label>
+                <input type="time" x-model="blockForm.end_time" class="input w-full">
+              </div>
+            </div>
+          </template>
+        </div>
+        <div class="flex items-center gap-3">
+          <button @click="saveBlock()" class="btn-primary" :disabled="blockSaving" x-text="blockSaving ? 'Saving…' : '+ Add Block'"></button>
+          <span x-show="blockError" class="text-red-500 text-sm" x-text="blockError"></span>
+        </div>
+      </div>
+
+      <!-- Upcoming blocks list -->
+      <div class="card">
+        <h3 class="font-semibold text-slate-700 mb-4">Upcoming Closures & Blocks</h3>
+        <div x-show="blocks.length === 0" class="text-slate-400 text-center py-8">No closures or blocks scheduled.</div>
+        <div class="overflow-x-auto">
+          <table x-show="blocks.length > 0" class="w-full text-sm">
+            <thead>
+              <tr class="text-left border-b border-slate-100">
+                <th class="pb-3 text-slate-500 font-medium">Date</th>
+                <th class="pb-3 text-slate-500 font-medium">Applies To</th>
+                <th class="pb-3 text-slate-500 font-medium">Type</th>
+                <th class="pb-3 text-slate-500 font-medium">Reason</th>
+                <th class="pb-3 text-slate-500 font-medium"></th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-50">
+              <template x-for="b in blocks" :key="b.id">
+                <tr class="hover:bg-slate-50">
+                  <td class="py-3 font-mono text-sm font-medium" x-text="fmtBlockDate(b.date)"></td>
+                  <td class="py-3">
+                    <template x-if="b.employee_id === null">
+                      <span class="inline-flex items-center gap-1 text-xs bg-red-50 text-red-700 px-2 py-0.5 rounded-full font-medium">🏪 Entire Shop</span>
+                    </template>
+                    <template x-if="b.employee_id !== null">
+                      <span class="inline-flex items-center gap-1.5">
+                        <span class="w-2.5 h-2.5 rounded-full" :style="`background:${empColor(b.employee_id)}`"></span>
+                        <span x-text="empName(b.employee_id)"></span>
+                      </span>
+                    </template>
+                  </td>
+                  <td class="py-3">
+                    <template x-if="b.all_day">
+                      <span class="text-slate-600">🗓️ Full Day</span>
+                    </template>
+                    <template x-if="!b.all_day">
+                      <span class="text-slate-600 font-mono" x-text="`⏱️ ${b.start_time} – ${b.end_time}`"></span>
+                    </template>
+                  </td>
+                  <td class="py-3 text-slate-500" x-text="b.reason || '—'"></td>
+                  <td class="py-3">
+                    <button @click="deleteBlock(b.id)" class="text-red-400 hover:text-red-600 text-xs font-medium">Delete</button>
+                  </td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
     <!-- ── BOT MESSAGES ──────────────────────────────────────────── -->
     <div x-show="page === 'messages'" class="p-8">
       <div class="flex justify-between items-center mb-6">
@@ -454,38 +924,262 @@
     <div x-show="page === 'settings'" class="p-8">
       <div class="flex justify-between items-center mb-6">
         <h2 class="text-2xl font-bold text-slate-800">Settings</h2>
-        <button @click="saveSettings()" class="btn-primary">💾 Save</button>
+        <button @click="saveSettings()" class="btn-primary">💾 Save All</button>
       </div>
+
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+        <!-- ── Shop Info ───────────────────────────────────────────── -->
         <div class="card">
           <h3 class="font-bold text-slate-700 mb-4">🏪 Shop Info</h3>
           <div class="space-y-4">
-            <div><label class="label">Shop Name</label><input x-model="settings.shop_name" class="input"></div>
-            <div><label class="label">Address</label><input x-model="settings.shop_address" class="input"></div>
-            <div><label class="label">Phone / WhatsApp</label><input x-model="settings.shop_phone" class="input"></div>
-            <div><label class="label">Email</label><input x-model="settings.shop_email" class="input"></div>
-            <div><label class="label">Instagram</label><input x-model="settings.shop_instagram" class="input"></div>
-            <div><label class="label">Google Maps Link</label><input x-model="settings.google_maps_link" class="input"></div>
+            <div>
+              <label class="label">Shop Name</label>
+              <input x-model="settings.shop_name" class="input" placeholder="Jayden's Barbershop">
+            </div>
+            <div>
+              <label class="label">Address</label>
+              <input x-model="settings.shop_address" class="input" placeholder="Paramaribo, Suriname">
+            </div>
+            <div>
+              <label class="label">Phone / WhatsApp</label>
+              <input x-model="settings.shop_phone" class="input" placeholder="+597 XXX-XXXX">
+              <p class="text-xs text-slate-400 mt-1">Shown to customers when the bot is paused or unavailable.</p>
+            </div>
+            <div>
+              <label class="label">Management / Finance Contact</label>
+              <input x-model="settings.management_phone" class="input" placeholder="+597 XXX-XXXX">
+              <p class="text-xs text-slate-400 mt-1">Referred to customers when they ask about discounts, payments, or out-of-scope questions. Falls back to the shop phone if left empty.</p>
+            </div>
+            <div>
+              <label class="label">Email</label>
+              <input x-model="settings.shop_email" class="input" placeholder="info@example.com">
+            </div>
+            <div>
+              <label class="label">Instagram</label>
+              <input x-model="settings.shop_instagram" class="input" placeholder="@jaydensbarbershop">
+            </div>
+            <div>
+              <label class="label">Google Maps Link</label>
+              <input x-model="settings.google_maps_link" class="input" placeholder="https://maps.google.com/...">
+            </div>
           </div>
         </div>
-        <div class="card">
-          <h3 class="font-bold text-slate-700 mb-4">🌍 Regional</h3>
-          <div class="space-y-4">
-            <div><label class="label">Currency Symbol</label><input x-model="settings.currency" class="input" placeholder="SRD, $, £…"></div>
-            <div><label class="label">Timezone</label><input x-model="settings.timezone" class="input" placeholder="America/Paramaribo"></div>
+
+        <div class="space-y-6">
+
+          <!-- ── Booking ───────────────────────────────────────────────── -->
+          <div class="card">
+            <h3 class="font-bold text-slate-700 mb-4">📅 Booking</h3>
+            <div class="space-y-4">
+              <div>
+                <label class="label">Days Available for Booking</label>
+                <div class="flex items-center gap-3">
+                  <input type="number" x-model="settings.booking_days_ahead" class="input w-24" min="1" max="60" placeholder="20">
+                  <span class="text-sm text-slate-500">days from today</span>
+                </div>
+                <p class="text-xs text-slate-400 mt-1">How far ahead customers can book. E.g. 7 = one week, 14 = two weeks, 20 = three weeks.</p>
+              </div>
+            </div>
           </div>
-          <h3 class="font-bold text-slate-700 mb-4 mt-6">🤖 Bot</h3>
-          <div class="flex items-center gap-3">
-            <input type="checkbox" :checked="settings.allow_any_employee === '1'"
-              @change="settings.allow_any_employee = $event.target.checked ? '1' : '0'"
-              class="w-4 h-4 accent-amber-500">
-            <span class="text-sm text-slate-700">Show "Any Available Barber" option in booking</span>
+
+          <!-- ── Google Calendar ────────────────────────────────────── -->
+          <div class="card">
+            <div class="flex items-start justify-between mb-1">
+              <h3 class="font-bold text-slate-700">📅 Google Calendar</h3>
+              <span class="text-xs px-2 py-0.5 rounded-full font-semibold"
+                :class="{
+                  'bg-emerald-100 text-emerald-700': calendarTestResult === 'ok',
+                  'bg-red-100 text-red-600':         calendarTestResult === 'fail',
+                  'bg-slate-100 text-slate-500':     !calendarTestResult,
+                }"
+                x-text="calendarTestResult === 'ok' ? '✅ Connected' : calendarTestResult === 'fail' ? '❌ Error' : 'Not tested'">
+              </span>
+            </div>
+            <p class="text-xs text-slate-400 mb-4">Appointments booked via WhatsApp automatically appear in this calendar. It also blocks slots you've manually marked as busy.</p>
+
+            <div class="space-y-3">
+              <div>
+                <label class="label">Calendar ID</label>
+                <input x-model="settings.google_calendar_id" class="input font-mono text-xs"
+                  placeholder="yourname@gmail.com"
+                  @input="calendarTestResult = null">
+                <p class="text-xs text-slate-400 mt-1">
+                  Google Calendar → ⚙️ Settings → pick your calendar → <em>Integrate calendar</em> → Calendar ID
+                </p>
+              </div>
+
+              <!-- Test result detail -->
+              <div x-show="calendarTestResult === 'ok'" class="rounded-xl bg-emerald-50 border border-emerald-200 px-4 py-3 text-sm text-emerald-700">
+                ✅ Connected to <strong x-text="calendarTestName"></strong>
+                <span class="text-emerald-500 text-xs ml-1" x-text="calendarTestTz ? '(' + calendarTestTz + ')' : ''"></span>
+              </div>
+              <div x-show="calendarTestResult === 'fail'" class="rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-600">
+                ❌ <span x-text="calendarTestError"></span>
+              </div>
+
+              <div class="flex gap-2">
+                <button @click="testCalendar()" class="btn-secondary text-xs flex items-center gap-1.5" :disabled="calendarTesting">
+                  <svg x-show="calendarTesting" class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path>
+                  </svg>
+                  <span x-text="calendarTesting ? 'Testing…' : '🔗 Test Connection'"></span>
+                </button>
+                <button @click="saveSettings(); testCalendar()" class="btn-primary text-xs">💾 Save & Test</button>
+              </div>
+            </div>
           </div>
-        </div>
-      </div>
-      <div class="mt-4 flex gap-3">
+
+          <!-- ── Booking ────────────────────────────────────────────── -->
+          <div class="card">
+            <h3 class="font-bold text-slate-700 mb-4">📆 Booking</h3>
+            <div class="space-y-4">
+              <div>
+                <label class="label">Days Ahead Customers Can Book</label>
+                <div class="flex items-center gap-3">
+                  <input type="number" x-model="settings.booking_days_ahead" class="input w-24" min="1" max="60" placeholder="14">
+                  <span class="text-sm text-slate-500">days</span>
+                </div>
+                <p class="text-xs text-slate-400 mt-1">How far in advance a customer can book. Default is 14 days.</p>
+              </div>
+              <div class="flex items-center gap-3 pt-1">
+                <input type="checkbox" id="chk-any-employee"
+                  :checked="settings.allow_any_employee === '1'"
+                  @change="settings.allow_any_employee = $event.target.checked ? '1' : '0'"
+                  class="w-4 h-4 accent-amber-500">
+                <label for="chk-any-employee" class="text-sm text-slate-700 cursor-pointer">
+                  Show <strong>"Any Available Barber"</strong> option in booking flow
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <!-- ── Reminders ─────────────────────────────────────────── -->
+          <div class="card">
+            <div class="flex items-center justify-between mb-1">
+              <h3 class="font-bold text-slate-700">🔔 Appointment Reminders</h3>
+              <button @click="settings.reminder_enabled = settings.reminder_enabled === '1' ? '0' : '1'"
+                :class="settings.reminder_enabled === '1' ? 'bg-amber-500' : 'bg-slate-300'"
+                class="relative inline-flex h-6 w-11 rounded-full transition-colors flex-shrink-0">
+                <span :class="settings.reminder_enabled === '1' ? 'translate-x-6' : 'translate-x-1'"
+                  class="inline-block h-4 w-4 rounded-full bg-white shadow mt-1 transition-transform"></span>
+              </button>
+            </div>
+            <p class="text-xs text-slate-400 mb-4">Automatically send customers a WhatsApp reminder before their appointment.</p>
+            <div x-show="settings.reminder_enabled === '1'" class="space-y-3">
+              <div>
+                <label class="label">Hours before appointment</label>
+                <div class="flex items-center gap-3">
+                  <input type="number" x-model="settings.reminder_hours" class="input w-24" min="1" max="168" placeholder="24">
+                  <span class="text-sm text-slate-500">hours before</span>
+                </div>
+                <div class="flex gap-2 mt-2">
+                  <template x-for="h in [2, 6, 12, 24, 48]" :key="h">
+                    <button type="button" @click="settings.reminder_hours = String(h)"
+                      class="px-2.5 py-1 rounded-lg text-xs font-medium border transition"
+                      :class="settings.reminder_hours == h ? 'bg-amber-500 text-white border-amber-500' : 'bg-white text-slate-600 border-slate-200 hover:border-amber-400'">
+                      <span x-text="h + 'h'"></span>
+                    </button>
+                  </template>
+                </div>
+              </div>
+              <p class="text-xs text-slate-400">
+                💬 Edit the reminder message text in <button @click="nav('messages')" class="text-amber-500 underline">Bot Messages</button>.
+              </p>
+            </div>
+          </div>
+
+          <!-- ── Customer Service / Notification Numbers ──────────────────────── -->
+          <div class="card">
+            <h3 class="font-bold text-slate-700 mb-1">📲 Customer Service Numbers</h3>
+            <p class="text-xs text-slate-400 mb-4">These numbers receive automatic WhatsApp notifications for: new bookings (with customer details), cancellations, ratings, and first-time customers. Up to 2 numbers.</p>
+            <div class="space-y-4">
+              <div>
+                <label class="label">CS Number 1</label>
+                <input x-model="settings.cs_phone_1" class="input" placeholder="+597 XXX-XXXX">
+              </div>
+              <div>
+                <label class="label">CS Number 2 <span class="text-slate-400 font-normal">(optional)</span></label>
+                <input x-model="settings.cs_phone_2" class="input" placeholder="+597 XXX-XXXX">
+              </div>
+            </div>
+          </div>
+
+          <!-- ── Human Takeover ────────────────────────────────────────── -->
+          <div class="card">
+            <h3 class="font-bold text-slate-700 mb-1">👤 Human Takeover Keywords</h3>
+            <p class="text-xs text-slate-400 mb-4">Type these keywords in any customer WhatsApp chat to take over or release that conversation. The bot goes completely silent while a chat is paused.</p>
+            <div class="space-y-4">
+              <div>
+                <label class="label">Takeover Keyword</label>
+                <input x-model="settings.takeover_keyword" class="input font-mono" placeholder="#human">
+                <p class="text-xs text-slate-400 mt-1">Type this to pause the bot for that chat.</p>
+              </div>
+              <div>
+                <label class="label">Release Keyword</label>
+                <input x-model="settings.release_keyword" class="input font-mono" placeholder="#bot">
+                <p class="text-xs text-slate-400 mt-1">Type this to hand the conversation back to the bot.</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- ── Post-Appointment Survey ─────────────────────────────── -->
+          <div class="card">
+            <h3 class="font-bold text-slate-700 mb-4">⭐ Post-Appointment Survey</h3>
+            <div class="space-y-4">
+              <div class="flex items-center justify-between">
+                <div>
+                  <p class="text-sm font-medium text-slate-700">Enable Survey</p>
+                  <p class="text-xs text-slate-400">Automatically ask customers to rate their visit after the appointment.</p>
+                </div>
+                <button @click="settings.survey_enabled = settings.survey_enabled === '1' ? '0' : '1'"
+                  :class="settings.survey_enabled === '1' ? 'bg-amber-500' : 'bg-slate-300'"
+                  class="relative inline-flex h-6 w-11 rounded-full transition-colors flex-shrink-0">
+                  <span :class="settings.survey_enabled === '1' ? 'translate-x-6' : 'translate-x-1'"
+                    class="inline-block h-4 w-4 rounded-full bg-white shadow mt-1 transition-transform"></span>
+                </button>
+              </div>
+              <div x-show="settings.survey_enabled === '1'">
+                <label class="label">Send survey after (minutes)</label>
+                <input type="number" x-model="settings.survey_delay_minutes" class="input w-32" min="5" max="1440" placeholder="30">
+                <p class="text-xs text-slate-400 mt-1">How many minutes after the appointment ends before the survey is sent.</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- ── Regional ───────────────────────────────────────────── -->
+          <div class="card">
+            <h3 class="font-bold text-slate-700 mb-4">🌍 Regional</h3>
+            <div class="space-y-4">
+              <div>
+                <label class="label">Currency</label>
+                <input x-model="settings.currency" class="input" placeholder="SRD">
+                <p class="text-xs text-slate-400 mt-1">Shown next to prices in WhatsApp messages (e.g. SRD, USD, EUR).</p>
+              </div>
+              <div>
+                <label class="label">Timezone</label>
+                <select x-model="settings.timezone" class="input">
+                  <option value="America/Paramaribo">America/Paramaribo — Suriname (GMT-3)</option>
+                  <option value="America/New_York">America/New_York — US East (EST/EDT)</option>
+                  <option value="America/Chicago">America/Chicago — US Central (CST/CDT)</option>
+                  <option value="America/Denver">America/Denver — US Mountain (MST/MDT)</option>
+                  <option value="America/Los_Angeles">America/Los_Angeles — US West (PST/PDT)</option>
+                  <option value="America/Curacao">America/Curacao — Curaçao/Aruba (AST)</option>
+                  <option value="America/Guyana">America/Guyana — Guyana (GYT)</option>
+                  <option value="Europe/Amsterdam">Europe/Amsterdam (CET/CEST)</option>
+                  <option value="Europe/London">Europe/London (GMT/BST)</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+        </div><!-- end right column -->
+      </div><!-- end grid -->
+
+      <div class="mt-6 flex gap-3 items-center">
         <button @click="saveSettings()" class="btn-primary">💾 Save Settings</button>
-        <span x-show="settingsSaved" class="text-emerald-500 text-sm self-center">✅ Saved!</span>
+        <span x-show="settingsSaved" class="text-emerald-500 text-sm font-medium">✅ Saved!</span>
       </div>
     </div>
 
@@ -514,21 +1208,46 @@
           <input x-model="employeeForm.phone" class="input" placeholder="+597 XXX-XXXX">
         </div>
         <div>
-          <label class="label">Color</label>
+          <label class="label">Color <span class="normal-case font-normal text-slate-400">— matches Google Calendar</span></label>
           <div class="flex gap-2 flex-wrap mt-1">
-            <template x-for="c in ['#f59e0b','#10b981','#3b82f6','#8b5cf6','#ef4444','#ec4899','#64748b']" :key="c">
-              <button type="button" @click="employeeForm.color = c"
+            <template x-for="c in gcalColors" :key="c.hex">
+              <button type="button" @click="employeeForm.color = c.hex"
+                :title="c.name"
                 class="w-8 h-8 rounded-full border-2 transition"
-                :class="employeeForm.color === c ? 'border-slate-800 scale-110' : 'border-transparent'"
-                :style="`background:${c}`"></button>
+                :class="employeeForm.color === c.hex ? 'border-slate-800 scale-110' : 'border-transparent'"
+                :style="`background:${c.hex}`"></button>
             </template>
           </div>
+          <p class="text-xs text-slate-400 mt-1" x-text="gcalColors.find(c => c.hex === employeeForm.color)?.name || ''"></p>
         </div>
         <div>
           <label class="label">Google Calendar ID <span class="normal-case font-normal">(optional)</span></label>
           <input x-model="employeeForm.google_calendar_id" class="input font-mono text-xs"
             placeholder="example@gmail.com or calendar ID">
           <p class="text-xs text-slate-400 mt-1">Events for this barber will sync to this calendar.</p>
+        </div>
+        <div>
+          <label class="label">Services <span class="normal-case font-normal text-slate-400">— uncheck what this barber cannot do</span></label>
+          <div class="mt-2 space-y-2 max-h-48 overflow-y-auto pr-1">
+            <template x-for="s in services.filter(s=>s.is_active)" :key="s.id">
+              <label class="flex items-center gap-3 p-2 rounded-lg hover:bg-slate-50 cursor-pointer">
+                <input type="checkbox"
+                  :checked="!employeeForm.excluded_service_ids.includes(s.id)"
+                  @change="employeeForm.excluded_service_ids.includes(s.id)
+                    ? employeeForm.excluded_service_ids = employeeForm.excluded_service_ids.filter(id=>id!==s.id)
+                    : employeeForm.excluded_service_ids = [...employeeForm.excluded_service_ids, s.id]"
+                  class="w-4 h-4 rounded accent-amber-500">
+                <span class="text-lg leading-none" x-text="s.emoji || '✂️'"></span>
+                <span class="text-sm text-slate-700 font-medium" x-text="s.name"></span>
+                <span class="text-xs text-slate-400 ml-auto" x-text="s.duration + ' min'"></span>
+              </label>
+            </template>
+          </div>
+          <p class="text-xs text-slate-400 mt-2" x-show="employeeForm.excluded_service_ids.length === 0">
+            ⚡ Can perform <strong>all services</strong>
+          </p>
+          <p class="text-xs text-amber-600 mt-2" x-show="employeeForm.excluded_service_ids.length > 0"
+             x-text="`⚡ Cannot do ${employeeForm.excluded_service_ids.length} service(s) — can do ${services.filter(s=>s.is_active).length - employeeForm.excluded_service_ids.length} of ${services.filter(s=>s.is_active).length}`"></p>
         </div>
       </div>
       <div class="flex gap-3 mt-6">
@@ -610,20 +1329,60 @@ function app() {
     botMessages: [],
     settings: { currency: 'SRD', shop_name: '' },
     weeklyHours: [],
+    hoursLoading: false,
     apptFilter: { date: '', employee_id: '', status: '' },
     selectedHoursEmployee: null,
 
+    // Human takeover — paused chats
+    pausedChats: [],
+
     // WhatsApp connection state
-    waStatus: { status: 'loading', qrDataUrl: null, lastUpdated: null },
-    qrNonce: 0,   // incremented each time a NEW QR arrives; used as x-for key to force img remount
+    waStatus: { status: 'loading', lastUpdated: null },
+
+    // Google Calendar color palette (loaded from /api/colors)
+    gcalColors: [],
+
+    // Google Calendar test state
+    calendarTesting:    false,
+    calendarTestResult: null,   // null | 'ok' | 'fail'
+    calendarTestName:   '',
+    calendarTestTz:     '',
+    calendarTestError:  '',
 
     // UI state
     botPaused: false,
     showEmployeeModal: false,
     showServiceModal: false,
+    showNewApptModal: false,
+    newApptSaving: false,
+    newApptError: '',
+
+    // Closed Dates / Blocks
+    blocks: [],
+    blockForm: { date: '', employee_id: '', all_day: '1', start_time: '12:00', end_time: '13:00', reason: '' },
+    blockSaving: false,
+    blockError: '',
+
+    // Walk-in
+    showWalkInModal: false,
+    walkInForm: { service_id: '', employee_id: '', time: '', customer_name: '', customer_phone: '' },
+    walkInSlots: [],
+    walkInSlotsLoading: false,
+    walkInSaving: false,
+    walkInError: '',
+    newApptForm: { customer_name: '', customer_phone: '', service_id: '', employee_id: '', date: '', time: '', notes: '' },
+    newApptSlots: [],
+    newApptSlotsLoading: false,
+    newApptDaySchedule: [],
+    newApptScheduleLoading: false,
+    showScheduleModal: false,
+    scheduleEmployee: null,
+    scheduleDate: '',
+    scheduleDayAppts: [],
+    scheduleLoading: false,
     editingEmployee: null,
     editingService: null,
-    employeeForm: { name: '', phone: '', color: '#f59e0b', google_calendar_id: '' },
+    employeeForm: { name: '', phone: '', color: '#f59e0b', google_calendar_id: '', service_ids: [] },
     serviceForm: { name: '', emoji: '✂️', description: '', duration: 30, price: 0 },
     hoursSaved: false,
     messagesSaved: false,
@@ -649,10 +1408,6 @@ function app() {
         const r = await fetch('/api/whatsapp/status', { cache: 'no-store' });
         if (!r.ok) return;
         const data = await r.json();
-        // New QR arrived when lastUpdated changed while status is 'qr'
-        if (data.status === 'qr' && data.lastUpdated !== this.waStatus.lastUpdated) {
-          this.qrNonce++;   // triggers x-for key change → img element is fully remounted
-        }
         this.waStatus = data;
       } catch (_) {}
     },
@@ -680,7 +1435,7 @@ function app() {
         'qr':            { text: 'Scan QR code',    dot: 'bg-yellow-400 animate-pulse' },
         'authenticated': { text: 'Connecting…',     dot: 'bg-blue-400 animate-pulse' },
         'ready':         { text: 'Connected',        dot: 'bg-emerald-400' },
-        'disconnected':  { text: 'Disconnected',    dot: 'bg-red-400' },
+        'disconnected':  { text: 'Reconnecting…',   dot: 'bg-red-400 animate-pulse' },
       };
       return map[this.waStatus?.status] || map['loading'];
     },
@@ -703,8 +1458,12 @@ function app() {
     },
 
     async bootstrap() {
-      this.settings  = await this.api('GET', '/api/settings');
-      this.employees = await this.api('GET', '/api/employees');
+      [this.settings, this.employees, this.gcalColors, this.services] = await Promise.all([
+        this.api('GET', '/api/settings'),
+        this.api('GET', '/api/employees'),
+        this.api('GET', '/api/colors'),
+        this.api('GET', '/api/services'),
+      ]);
       this.botPaused = this.settings.bot_paused === '1';
       await this.loadDashboard();
     },
@@ -715,6 +1474,7 @@ function app() {
       if (p === 'appointments') await this.loadAppointments();
       if (p === 'employees')    this.employees = await this.api('GET', '/api/employees');
       if (p === 'hours')        await this.loadHours();
+      if (p === 'blocks')       await this.loadBlocks();
       if (p === 'services')     this.services = await this.api('GET', '/api/services');
       if (p === 'messages')     this.botMessages = await this.api('GET', '/api/messages');
       if (p === 'settings') {
@@ -725,8 +1485,9 @@ function app() {
 
     async loadDashboard() {
       const data = await this.api('GET', '/api/dashboard');
-      this.stats              = data.stats || {};
-      this.todayAppointments  = data.today || [];
+      this.stats             = data.stats || {};
+      this.todayAppointments = data.today || [];
+      this.pausedChats       = await this.api('GET', '/api/chat-pauses');
     },
 
     async loadAppointments() {
@@ -738,10 +1499,13 @@ function app() {
     },
 
     async loadHours() {
+      this.hoursLoading = true;
+      this.weeklyHours  = [];
       const url = this.selectedHoursEmployee != null
         ? `/api/hours/${this.selectedHoursEmployee}`
         : '/api/hours';
-      this.weeklyHours = await this.api('GET', url);
+      this.weeklyHours  = await this.api('GET', url);
+      this.hoursLoading = false;
     },
 
     async saveHours() {
@@ -769,6 +1533,33 @@ function app() {
       this.showToast('✅ Settings saved!');
     },
 
+    async testCalendar() {
+      const id = this.settings.google_calendar_id?.trim();
+      if (!id) {
+        this.calendarTestResult = 'fail';
+        this.calendarTestError  = 'Please enter a Calendar ID first.';
+        return;
+      }
+      this.calendarTesting    = true;
+      this.calendarTestResult = null;
+      try {
+        const res = await this.api('POST', '/api/settings/test-calendar', { calendarId: id });
+        if (res.ok) {
+          this.calendarTestResult = 'ok';
+          this.calendarTestName   = res.name || id;
+          this.calendarTestTz     = res.timezone || '';
+        } else {
+          this.calendarTestResult = 'fail';
+          this.calendarTestError  = res.error || 'Unknown error';
+        }
+      } catch (e) {
+        this.calendarTestResult = 'fail';
+        this.calendarTestError  = e.message || 'Request failed';
+      } finally {
+        this.calendarTesting = false;
+      }
+    },
+
     async toggleBotPause() {
       this.botPaused = !this.botPaused;
       await this.api('PUT', '/api/settings', { bot_paused: this.botPaused ? '1' : '0' });
@@ -778,10 +1569,113 @@ function app() {
     // Employee CRUD
     openEmployeeModal(emp = null) {
       this.editingEmployee = emp;
+      // excluded_service_ids = services this barber CANNOT do (empty = can do everything)
       this.employeeForm = emp
-        ? { name: emp.name, phone: emp.phone, color: emp.color, google_calendar_id: emp.google_calendar_id }
-        : { name: '', phone: '', color: '#f59e0b', google_calendar_id: '' };
+        ? { name: emp.name, phone: emp.phone, color: emp.color, google_calendar_id: emp.google_calendar_id, excluded_service_ids: emp.excluded_service_ids || [] }
+        : { name: '', phone: '', color: '#f59e0b', google_calendar_id: '', excluded_service_ids: [] };
       this.showEmployeeModal = true;
+    },
+
+    // New Appointment (manual)
+    openNewApptModal() {
+      this.newApptForm = { customer_name: '', customer_phone: '', service_id: '', employee_id: '', date: new Date().toISOString().slice(0,10), time: '', notes: '' };
+      this.newApptError = '';
+      this.newApptSaving = false;
+      this.newApptSlots = [];
+      this.newApptDaySchedule = [];
+      this.showNewApptModal = true;
+    },
+
+    // Returns active employees who can perform the given service.
+    // Mirrors bot logic: excluded_service_ids holds what they CANNOT do.
+    // New services appear for everyone automatically (not in anyone's exclusion list).
+    employeesForService(serviceId) {
+      if (!serviceId) return this.employees.filter(e => e.is_active);
+      return this.employees.filter(e =>
+        e.is_active && !e.excluded_service_ids?.includes(serviceId)
+      );
+    },
+
+    async onNewApptServiceChange() {
+      this.newApptForm.time = '';
+      this.newApptSlots = [];
+
+      // If current barber can't do the newly selected service, clear them
+      const { service_id, date } = this.newApptForm;
+      let { employee_id } = this.newApptForm;
+      if (service_id && employee_id) {
+        const stillValid = this.employeesForService(service_id).some(e => String(e.id) === String(employee_id));
+        if (!stillValid) {
+          this.newApptForm.employee_id = '';
+          employee_id = '';
+        }
+      }
+
+      // Re-read after possible reset above
+      const eid = this.newApptForm.employee_id;
+
+      // Load day schedule whenever barber + date are set (no service needed)
+      if (eid && date) {
+        this.newApptScheduleLoading = true;
+        const allAppts = await this.api('GET', `/api/appointments?employee_id=${eid}&date=${date}`);
+        this.newApptDaySchedule = Array.isArray(allAppts)
+          ? allAppts.filter(a => a.status !== 'cancelled').sort((a,b) => a.start_time.localeCompare(b.start_time))
+          : [];
+        this.newApptScheduleLoading = false;
+      } else {
+        this.newApptDaySchedule = [];
+      }
+
+      // Load available slots only when all three are set
+      if (!service_id || !eid || !date) return;
+      const svc = this.services.find(s => s.id === service_id);
+      if (!svc) return;
+      this.newApptSlotsLoading = true;
+      const slots = await this.api('GET', `/api/slots?employee_id=${eid}&date=${date}&duration=${svc.duration}`);
+      this.newApptSlotsLoading = false;
+      this.newApptSlots = Array.isArray(slots) ? slots : [];
+    },
+
+    async saveNewAppt() {
+      this.newApptError = '';
+      const f = this.newApptForm;
+      if (!f.customer_name || !f.customer_phone || !f.service_id || !f.employee_id || !f.date || !f.time) {
+        this.newApptError = 'Please fill in all required fields.'; return;
+      }
+      const svc = this.services.find(s => s.id === f.service_id);
+      if (!svc) { this.newApptError = 'Service not found.'; return; }
+
+      const startTime = new Date(`${f.date}T${f.time}:00`);
+      const endTime   = new Date(startTime.getTime() + svc.duration * 60000);
+      const emp       = f.employee_id ? this.employees.find(e => String(e.id) === String(f.employee_id)) : null;
+
+      const body = {
+        customer_name:    f.customer_name,
+        customer_phone:   f.customer_phone,
+        service_id:       svc.id,
+        service_name:     svc.name,
+        service_emoji:    svc.emoji || '',
+        service_duration: svc.duration,
+        service_price:    svc.price,
+        employee_id:      emp?.id || null,
+        start_time:       startTime.toISOString(),
+        end_time:         endTime.toISOString(),
+        notes:            f.notes || '',
+      };
+
+      this.newApptSaving = true;
+      const res = await this.api('POST', '/api/appointments', body);
+      this.newApptSaving = false;
+
+      if (res.ok) {
+        this.showNewApptModal = false;
+        await this.loadAppointments();
+        await this.loadDashboard();
+        const calMsg = res.calendarSynced ? ' & synced to Google Calendar ✅' : '';
+        this.showToast(`✅ Appointment created${calMsg}!`);
+      } else {
+        this.newApptError = res.error || 'Failed to save appointment.';
+      }
     },
 
     async saveEmployee() {
@@ -799,6 +1693,45 @@ function app() {
     async toggleEmployee(id) {
       await this.api('POST', `/api/employees/${id}/toggle`);
       this.employees = await this.api('GET', '/api/employees');
+    },
+
+    async releaseChat(chatId) {
+      await this.api('POST', `/api/chat-pauses/${encodeURIComponent(chatId)}/resume`);
+      this.pausedChats = await this.api('GET', '/api/chat-pauses');
+      this.showToast('🤖 Chat released back to bot');
+    },
+
+    async toggleAwayToday(id) {
+      await this.api('POST', `/api/employees/${id}/away`);
+      this.employees = await this.api('GET', '/api/employees');
+      const emp = this.employees.find(e => e.id === id);
+      this.showToast(emp?.isAwayToday ? '🚫 Marked as away today' : '✅ Back and available today');
+    },
+
+    // Employee schedule modal
+    async openScheduleModal(emp) {
+      this.scheduleEmployee = emp;
+      this.scheduleDate = new Date().toISOString().slice(0, 10);
+      this.scheduleDayAppts = [];
+      this.showScheduleModal = true;
+      await this.loadSchedule();
+    },
+
+    async loadSchedule() {
+      if (!this.scheduleEmployee || !this.scheduleDate) return;
+      this.scheduleLoading = true;
+      const appts = await this.api('GET', `/api/appointments?employee_id=${this.scheduleEmployee.id}&date=${this.scheduleDate}`);
+      this.scheduleDayAppts = Array.isArray(appts)
+        ? appts.filter(a => a.status !== 'cancelled').sort((a, b) => a.start_time.localeCompare(b.start_time))
+        : [];
+      this.scheduleLoading = false;
+    },
+
+    scheduleChangeDay(delta) {
+      const d = new Date(this.scheduleDate + 'T12:00:00');
+      d.setDate(d.getDate() + delta);
+      this.scheduleDate = d.toISOString().slice(0, 10);
+      this.loadSchedule();
     },
 
     // Service CRUD
@@ -837,6 +1770,19 @@ function app() {
       this.showToast(`✅ Marked as ${status}`);
     },
 
+    async syncToCalendar(appt) {
+      this.showToast('📅 Syncing to Google Calendar…');
+      const res = await this.api('POST', `/api/appointments/${appt.id}/sync-calendar`);
+      if (res.ok) {
+        this.showToast('✅ Appointment added to Google Calendar!');
+        await this.loadAppointments();
+        // Open the newly created event directly
+        if (res.eventLink) window.open(res.eventLink, '_blank');
+      } else {
+        this.showToast('❌ ' + (res.error || 'Calendar sync failed'));
+      }
+    },
+
     // Helpers
     statusBadge(s) {
       return { confirmed: 'badge-blue', completed: 'badge-green', cancelled: 'badge-red', 'no-show': 'badge-orange' }[s] || 'badge-gray';
@@ -851,6 +1797,131 @@ function app() {
       if (!dt) return '—';
       const d = new Date(dt);
       return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ' ' + this.fmtTime(dt);
+    },
+
+    // ── Closed Dates / Blocks ─────────────────────────────────────────────────
+
+    async loadBlocks() {
+      // Show all blocks from today onwards (and last 7 days for reference)
+      const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - 7);
+      const all = await this.api('GET', '/api/blocks');
+      this.blocks = (all || []).filter(b => b.date >= cutoff.toISOString().slice(0,10));
+    },
+
+    async saveBlock() {
+      this.blockError = '';
+      if (!this.blockForm.date) { this.blockError = 'Please select a date.'; return; }
+      if (this.blockForm.all_day == '0' && (!this.blockForm.start_time || !this.blockForm.end_time)) {
+        this.blockError = 'Please set start and end time.'; return;
+      }
+      this.blockSaving = true;
+      const res = await this.api('POST', '/api/blocks', {
+        ...this.blockForm,
+        all_day: this.blockForm.all_day == '1',
+        employee_id: this.blockForm.employee_id || null,
+      });
+      this.blockSaving = false;
+      if (res.error) { this.blockError = res.error; return; }
+      this.blockForm = { date: '', employee_id: '', all_day: '1', start_time: '12:00', end_time: '13:00', reason: '' };
+      await this.loadBlocks();
+      this.showToast('🚫 Block added');
+    },
+
+    async deleteBlock(id) {
+      if (!confirm('Remove this block?')) return;
+      await this.api('DELETE', `/api/blocks/${id}`);
+      await this.loadBlocks();
+      this.showToast('✅ Block removed');
+    },
+
+    fmtBlockDate(dateStr) {
+      // dateStr is 'YYYY-MM-DD' — parse as local noon to avoid timezone shifting
+      return new Date(dateStr + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+    },
+
+    empName(id) {
+      const e = this.employees.find(e => String(e.id) === String(id));
+      return e ? e.name : '—';
+    },
+    empColor(id) {
+      const e = this.employees.find(e => String(e.id) === String(id));
+      return e ? e.color : '#94a3b8';
+    },
+
+    // ── Walk-in ────────────────────────────────────────────────────────────────
+
+    openWalkInModal() {
+      this.walkInForm = { service_id: '', employee_id: '', time: '', customer_name: '', customer_phone: '' };
+      this.walkInSlots = [];
+      this.walkInError = '';
+      this.walkInSaving = false;
+      this.showWalkInModal = true;
+    },
+
+    walkInEmployees() {
+      if (!this.walkInForm.service_id) return this.employees.filter(e => e.is_active);
+      return this.employees.filter(e =>
+        e.is_active && !(e.excluded_service_ids || []).includes(this.walkInForm.service_id)
+      );
+    },
+
+    async loadWalkInSlots() {
+      this.walkInForm.time = '';
+      this.walkInSlots = [];
+      const { service_id, employee_id } = this.walkInForm;
+      if (!service_id || !employee_id) return;
+
+      const svc = this.services.find(s => String(s.id) === String(service_id));
+      if (!svc) return;
+
+      this.walkInSlotsLoading = true;
+      const today = new Date().toISOString().slice(0, 10);
+      const raw = await this.api('GET', `/api/slots?employee_id=${employee_id}&date=${today}&duration=${svc.duration}`);
+      this.walkInSlotsLoading = false;
+
+      // Filter to future slots only (now + 5 min buffer)
+      const nowMins = new Date().getHours() * 60 + new Date().getMinutes() + 5;
+      this.walkInSlots = (raw || []).filter(t => {
+        const [h, m] = t.split(':').map(Number);
+        return h * 60 + m >= nowMins;
+      });
+    },
+
+    async saveWalkIn() {
+      this.walkInError = '';
+      const f = this.walkInForm;
+      if (!f.service_id || !f.employee_id || !f.time || !f.customer_name) {
+        this.walkInError = 'Please fill in all required fields.'; return;
+      }
+      const svc = this.services.find(s => String(s.id) === String(f.service_id));
+      if (!svc) { this.walkInError = 'Service not found.'; return; }
+
+      const today = new Date().toISOString().slice(0, 10);
+      const [h, m] = f.time.split(':').map(Number);
+      const start = new Date(`${today}T${f.time}:00`);
+      const end   = new Date(start.getTime() + svc.duration * 60000);
+
+      this.walkInSaving = true;
+      const res = await this.api('POST', '/api/appointments', {
+        customer_name:    f.customer_name,
+        customer_phone:   f.customer_phone || 'walk-in',
+        service_id:       svc.id,
+        service_name:     svc.name,
+        service_emoji:    svc.emoji,
+        service_duration: svc.duration,
+        service_price:    svc.price,
+        employee_id:      f.employee_id,
+        start_time:       start.toISOString(),
+        end_time:         end.toISOString(),
+        notes:            'Walk-in',
+        status:           'confirmed',
+      });
+      this.walkInSaving = false;
+
+      if (res.error) { this.walkInError = res.error; return; }
+      this.showWalkInModal = false;
+      await this.loadDashboard();
+      this.showToast('✅ Walk-in registered!');
     },
 
     showToast(msg) {

@@ -6,7 +6,9 @@ const express   = require('express');
 const router    = express.Router();
 const q                  = require('../../db/queries');
 const { state: waState, update: waUpdate } = require('../../whatsapp-state');
+const { GCAL_COLORS, cancelEvent } = require('../../services/googleCalendar');
 const { getClient }      = require('../../whatsapp-client');
+const chatPause          = require('../../utils/chatPause');
 const { startBot }       = require('../../bot-runner');
 
 // ── Auth middleware ───────────────────────────────────────────────────────────
@@ -45,9 +47,22 @@ router.get('/whatsapp/status', (req, res) => {
   res.set('Cache-Control', 'no-store');
   res.json({
     status:      waState.status,
-    qrDataUrl:   waState.status === 'qr' ? waState.qrDataUrl : null,
     lastUpdated: waState.lastUpdated,
   });
+});
+
+// ── WhatsApp QR image (no auth — PNG bytes, cache-busted by ?t= timestamp) ───
+// Serving as real PNG bytes (not a base64 data URL) guarantees every browser
+// fetches the latest image when the URL's ?t= query-string changes.
+router.get('/whatsapp/qr', (req, res) => {
+  if (waState.status !== 'qr' || !waState.qrDataUrl) {
+    return res.status(404).end();
+  }
+  const base64 = waState.qrDataUrl.replace(/^data:image\/png;base64,/, '');
+  const buf    = Buffer.from(base64, 'base64');
+  res.set('Content-Type',  'image/png');
+  res.set('Cache-Control', 'no-store');
+  res.send(buf);
 });
 
 // ── WhatsApp reconnect (auth-protected) ──────────────────────────────────────
@@ -80,6 +95,21 @@ router.get('/dashboard', (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── Available slots ───────────────────────────────────────────────────────────
+// GET /api/slots?employee_id=&date=YYYY-MM-DD&duration=30
+// Returns array of "HH:MM" strings the employee is free for that duration.
+router.get('/slots', async (req, res) => {
+  try {
+    const { employee_id, date, duration } = req.query;
+    if (!employee_id || !date || !duration)
+      return res.status(400).json({ error: 'employee_id, date and duration are required' });
+    const employee = q.getEmployee(employee_id);
+    if (!employee) return res.status(404).json({ error: 'Employee not found' });
+    const slots = await q.getAvailableSlotsForEmployee(employee, new Date(date + 'T00:00:00'), +duration);
+    res.json(slots.map(s => s.time)); // just the "HH:MM" strings
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── Appointments ──────────────────────────────────────────────────────────────
 
 router.get('/appointments', (req, res) => {
@@ -89,32 +119,182 @@ router.get('/appointments', (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.post('/appointments', (req, res) => {
+router.post('/appointments', async (req, res) => {
   try {
     const result = q.createAppointment(req.body);
-    res.json({ ok: true, id: result.lastInsertRowid });
+    const id     = result.lastInsertRowid;
+
+    // Auto-sync to Google Calendar (non-fatal if it fails)
+    let calendarSynced = false;
+    try {
+      const { createAppointment: calCreate } = require('../../services/googleCalendar');
+      const employee    = req.body.employee_id ? q.getEmployee(req.body.employee_id) : null;
+      const shopCalId   = q.getSetting('google_calendar_id') ||
+        (process.env.GOOGLE_CALENDAR_ID !== 'primary' ? process.env.GOOGLE_CALENDAR_ID : null);
+      const barberCalId = employee?.google_calendar_id || null;
+
+      if (shopCalId || barberCalId) {
+        const eventData = {
+          service:       { name: req.body.service_name, emoji: req.body.service_emoji, duration: req.body.service_duration, price: req.body.service_price },
+          startTime:     new Date(req.body.start_time),
+          endTime:       new Date(req.body.end_time),
+          customerName:  req.body.customer_name,
+          bookingCode:   result.booking_code,
+          employeeName:  employee?.name,
+          employeeColor: employee?.color,
+        };
+        // Shop calendar — always
+        if (shopCalId) {
+          const r = await calCreate({ ...eventData, calendarId: shopCalId });
+          if (r.success) {
+            q.updateAppointment(id, { google_event_id: r.eventId, google_event_link: r.eventLink });
+            calendarSynced = true;
+          }
+        }
+        // Barber's personal calendar — if different from shop calendar
+        if (barberCalId && barberCalId !== shopCalId)
+          await calCreate({ ...eventData, calendarId: barberCalId });
+      }
+    } catch (calErr) {
+      console.error('⚠️  Calendar sync skipped:', calErr.message);
+    }
+
+    res.json({ ok: true, id, calendarSynced });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.put('/appointments/:id', (req, res) => {
+router.put('/appointments/:id', async (req, res) => {
   try {
+    const appt = q.getAppointmentById(req.params.id);
     q.updateAppointment(req.params.id, req.body);
+
+    // When status changes to cancelled, remove the Google Calendar event
+    if (req.body.status === 'cancelled' && appt?.google_event_id) {
+      const shopCalId = q.getSetting('google_calendar_id') ||
+        (process.env.GOOGLE_CALENDAR_ID !== 'primary' ? process.env.GOOGLE_CALENDAR_ID : null);
+
+      // Delete from shop calendar
+      if (shopCalId) {
+        cancelEvent({ calendarId: shopCalId, eventId: appt.google_event_id })
+          .catch(e => console.error('⚠️  Calendar cancel (shop):', e.message));
+      }
+
+      // Delete from barber's personal calendar if set
+      const employee = appt.employee_id ? q.getEmployee(appt.employee_id) : null;
+      if (employee?.google_calendar_id) {
+        cancelEvent({ calendarId: employee.google_calendar_id, eventId: appt.google_event_id })
+          .catch(e => console.error('⚠️  Calendar cancel (barber):', e.message));
+      }
+    }
+
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// POST /api/appointments/:id/sync-calendar
+// Retroactively create a Google Calendar event for an appointment that missed it.
+router.post('/appointments/:id/sync-calendar', async (req, res) => {
+  try {
+    const appts = q.getAppointments({});
+    const appt  = appts.find(a => String(a.id) === String(req.params.id));
+    if (!appt) return res.status(404).json({ error: 'Appointment not found' });
+
+    const employee    = appt.employee_id ? q.getEmployee(appt.employee_id) : null;
+    const shopCalId   = q.getSetting('google_calendar_id') ||
+      (process.env.GOOGLE_CALENDAR_ID !== 'primary' ? process.env.GOOGLE_CALENDAR_ID : null);
+    const barberCalId = employee?.google_calendar_id || null;
+
+    if (!shopCalId && !barberCalId)
+      return res.status(400).json({ error: 'No calendar configured. Set a Calendar ID in Settings.' });
+
+    const { createAppointment: calCreate } = require('../../services/googleCalendar');
+    const eventData = {
+      service:       { name: appt.service_name, emoji: appt.service_emoji, duration: appt.service_duration, price: appt.service_price },
+      startTime:     new Date(appt.start_time),
+      endTime:       new Date(appt.end_time),
+      customerName:  appt.customer_name,
+      bookingCode:   appt.booking_code,
+      employeeName:  employee?.name,
+      employeeColor: employee?.color,
+    };
+
+    // Shop calendar — always (owner sees all appointments)
+    let shopResult = { success: false, error: 'No shop calendar set' };
+    if (shopCalId) {
+      shopResult = await calCreate({ ...eventData, calendarId: shopCalId });
+      if (shopResult.success) q.updateAppointment(appt.id, { google_event_id: shopResult.eventId, google_event_link: shopResult.eventLink });
+    }
+
+    // Barber's personal calendar — if configured and different from shop calendar
+    if (barberCalId && barberCalId !== shopCalId)
+      await calCreate({ ...eventData, calendarId: barberCalId });
+
+    if (!shopResult.success && !barberCalId)
+      return res.status(500).json({ error: shopResult.error });
+
+    res.json({ ok: true, eventLink: shopResult.eventLink });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Reminder test — sends the reminder for one appointment without marking it sent
+router.post('/reminders/test/:bookingCode', async (req, res) => {
+  try {
+    const { getClient }    = require('../../whatsapp-client');
+    const { state: waState } = require('../../whatsapp-state');
+    const client = getClient();
+    if (!client || waState.status !== 'ready')
+      return res.status(503).json({ error: 'WhatsApp bot is not connected. Start the bot first.' });
+
+    const appts = q.getAppointments({});
+    const appt  = appts.find(a => a.booking_code === req.params.bookingCode.toUpperCase());
+    if (!appt) return res.status(404).json({ error: 'Booking code not found' });
+
+    const { checkReminders } = require('../../reminder-scheduler');
+    // Temporarily call sendReminder directly (import the internals via the scheduler module)
+    const employee = appt.employee_id ? q.getEmployee(appt.employee_id) : null;
+    const tz       = q.getSetting('timezone') || 'America/Paramaribo';
+    const start    = new Date(appt.start_time);
+    const dateStr  = start.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric', timeZone: tz });
+    const timeStr  = start.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: tz });
+
+    const template = q.getBotMessage('reminder_message') || '⏰ Reminder: {service_name} on {date} at {time}. Code: {booking_code}';
+    const message  = template
+      .replace(/{customer_name}/g,  appt.customer_name      || '')
+      .replace(/{service_name}/g,   appt.service_name       || '')
+      .replace(/{barber_name}/g,    employee?.name          || 'your barber')
+      .replace(/{date}/g,           dateStr)
+      .replace(/{time}/g,           timeStr)
+      .replace(/{booking_code}/g,   appt.booking_code       || '')
+      .replace(/{shop_name}/g,      q.getSetting('shop_name')    || "Jayden's Barbershop")
+      .replace(/{shop_address}/g,   q.getSetting('shop_address') || '');
+
+    const waId = appt.customer_phone.includes('@') ? appt.customer_phone : `${appt.customer_phone}@c.us`;
+    await client.sendMessage(waId, message);
+    res.json({ ok: true, sentTo: appt.customer_name, waId });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Color palette (Google Calendar colors) ────────────────────────────────────
+router.get('/colors', (req, res) => res.json(GCAL_COLORS));
+
 // ── Employees ─────────────────────────────────────────────────────────────────
 
 router.get('/employees', (req, res) => {
-  try { res.json(q.getEmployees()); }
+  try {
+    const employees = q.getEmployees().map(e => ({
+      ...e,
+      isAwayToday: q.isEmployeeAwayToday(e.id),
+    }));
+    res.json(employees);
+  }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.post('/employees', (req, res) => {
   try {
-    const { name, phone, color, google_calendar_id } = req.body;
+    const { name, phone, color, google_calendar_id, excluded_service_ids } = req.body;
     if (!name) return res.status(400).json({ error: 'Name is required' });
-    const result = q.createEmployee(name, phone, color, google_calendar_id);
+    const result = q.createEmployee(name, phone, color, google_calendar_id, excluded_service_ids || []);
     res.json({ ok: true, id: result.lastInsertRowid });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -123,6 +303,13 @@ router.put('/employees/:id', (req, res) => {
   try {
     q.updateEmployee(req.params.id, req.body);
     res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/employees/:id/away', (req, res) => {
+  try {
+    const isAway = q.toggleEmployeeAwayToday(req.params.id);
+    res.json({ ok: true, isAway });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -220,6 +407,69 @@ router.get('/settings', (req, res) => {
 router.put('/settings', (req, res) => {
   try {
     q.setManySettings(req.body);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/settings/test-calendar — verifies the Calendar ID is accessible
+router.post('/settings/test-calendar', async (req, res) => {
+  const { calendarId } = req.body;
+  if (!calendarId) return res.status(400).json({ error: 'No Calendar ID provided' });
+  try {
+    const { google } = require('googleapis');
+    const path       = require('path');
+    const credPath   = process.env.GOOGLE_CREDENTIALS_PATH ||
+      path.join(process.cwd(), 'credentials', 'service-account.json');
+    const auth = new google.auth.GoogleAuth({
+      keyFile: credPath,
+      scopes: ['https://www.googleapis.com/auth/calendar'],
+    });
+    const client = await auth.getClient();
+    const cal    = google.calendar({ version: 'v3', auth: client });
+    const r      = await cal.calendars.get({ calendarId });
+    res.json({ ok: true, name: r.data.summary, timezone: r.data.timeZone });
+  } catch (e) {
+    const msg = e.message.includes('Not Found')
+      ? 'Calendar not found — check the ID and make sure it\'s shared with the service account'
+      : e.message.includes('disabled')
+      ? 'Google Calendar API is not enabled in Google Cloud Console'
+      : e.message.includes('ENOENT')
+      ? 'Service account file not found at credentials/service-account.json'
+      : e.message;
+    res.status(400).json({ error: msg });
+  }
+});
+
+// ── Human Takeover ────────────────────────────────────────────────────────────
+
+router.get('/chat-pauses', (req, res) => {
+  res.json(chatPause.getPausedChats());
+});
+
+router.post('/chat-pauses/:chatId/resume', (req, res) => {
+  chatPause.resumeChat(decodeURIComponent(req.params.chatId));
+  res.json({ ok: true });
+});
+
+// ── Blocked Dates (shop closures, barber days-off, time blocks) ───────────────
+
+router.get('/blocks', (req, res) => {
+  try {
+    const { date, employee_id } = req.query;
+    res.json(q.getBlocks({ date, employeeId: employee_id }));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/blocks', (req, res) => {
+  try {
+    const result = q.addBlock(req.body);
+    res.json({ ok: true, id: result.lastInsertRowid });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.delete('/blocks/:id', (req, res) => {
+  try {
+    q.deleteBlock(req.params.id);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
