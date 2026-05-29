@@ -27,7 +27,12 @@ function createServer() {
   app.use('/api', apiRouter);
   app.use(express.static(path.join(__dirname, 'public')));
 
-  // SPA fallback
+  // Barber QR scanner page (separate from admin dashboard — no login required)
+  app.get('/scan', (_req, res) =>
+    res.sendFile(path.join(__dirname, 'public', 'scan.html'))
+  );
+
+  // SPA fallback — admin dashboard
   app.get('*', (_req, res) =>
     res.sendFile(path.join(__dirname, 'public', 'index.html'))
   );

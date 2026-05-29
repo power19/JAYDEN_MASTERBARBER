@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Check-In Scanner</title>
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #0f172a;
+      color: #fff;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+
+    /* ── PIN screen ─────────────────────────────────────────── */
+    #pin-screen { text-align: center; width: 100%; max-width: 320px; }
+    .logo { font-size: 56px; margin-bottom: 12px; }
+    .shop-name { font-size: 22px; font-weight: 800; color: #f59e0b; margin-bottom: 4px; }
+    .subtitle  { font-size: 13px; color: #64748b; margin-bottom: 36px; }
+
+    .pin-display {
+      display: flex; gap: 12px; justify-content: center; margin-bottom: 28px;
+    }
+    .pin-dot {
+      width: 16px; height: 16px; border-radius: 50%;
+      border: 2px solid #475569; background: transparent;
+      transition: background 0.15s;
+    }
+    .pin-dot.filled { background: #f59e0b; border-color: #f59e0b; }
+
+    .pin-error { color: #ef4444; font-size: 13px; margin-bottom: 12px; min-height: 18px; }
+
+    .numpad {
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;
+      margin-bottom: 16px;
+    }
+    .numpad button {
+      background: #1e293b; border: none; border-radius: 16px;
+      color: #fff; font-size: 22px; font-weight: 700;
+      padding: 18px 0; cursor: pointer; transition: background 0.1s, transform 0.1s;
+    }
+    .numpad button:active { background: #f59e0b; color: #0f172a; transform: scale(0.94); }
+    .numpad button.del { font-size: 18px; color: #94a3b8; }
+    .numpad button.empty { background: transparent; cursor: default; }
+
+    /* ── Scanner screen ─────────────────────────────────────── */
+    #scan-screen { display: none; width: 100%; max-width: 360px; text-align: center; }
+    .scan-header {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 16px;
+    }
+    .scan-title { font-size: 18px; font-weight: 700; color: #f59e0b; }
+    .lock-btn {
+      background: #1e293b; border: none; border-radius: 10px;
+      color: #64748b; font-size: 13px; padding: 6px 12px; cursor: pointer;
+    }
+    .lock-btn:hover { color: #ef4444; }
+
+    #qr-reader { border-radius: 20px; overflow: hidden; }
+
+    /* ── Result overlay ─────────────────────────────────────── */
+    #result-overlay {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,0.85); z-index: 100;
+      flex-direction: column; align-items: center; justify-content: center;
+      text-align: center; padding: 32px;
+    }
+    #result-overlay.show { display: flex; }
+    .result-icon { font-size: 72px; margin-bottom: 16px; }
+    .result-name { font-size: 26px; font-weight: 800; margin-bottom: 6px; }
+    .result-service { font-size: 16px; color: #94a3b8; margin-bottom: 8px; }
+    .result-barber  { font-size: 14px; color: #64748b; }
+    .result-ok    { color: #34d399; }
+    .result-warn  { color: #fbbf24; }
+    .result-error { color: #f87171; }
+  </style>
+</head>
+<body>
+
+  <!-- ── PIN Screen ─────────────────────────────────────────── -->
+  <div id="pin-screen">
+    <div class="logo">💈</div>
+    <div class="shop-name" id="shop-name-label">Barbershop</div>
+    <div class="subtitle">Barber Check-In Scanner</div>
+
+    <div class="pin-display" id="pin-dots">
+      <div class="pin-dot" id="d0"></div>
+      <div class="pin-dot" id="d1"></div>
+      <div class="pin-dot" id="d2"></div>
+      <div class="pin-dot" id="d3"></div>
+    </div>
+
+    <div class="pin-error" id="pin-error"></div>
+
+    <div class="numpad">
+      <button onclick="pinPress('1')">1</button>
+      <button onclick="pinPress('2')">2</button>
+      <button onclick="pinPress('3')">3</button>
+      <button onclick="pinPress('4')">4</button>
+      <button onclick="pinPress('5')">5</button>
+      <button onclick="pinPress('6')">6</button>
+      <button onclick="pinPress('7')">7</button>
+      <button onclick="pinPress('8')">8</button>
+      <button onclick="pinPress('9')">9</button>
+      <button class="empty"></button>
+      <button onclick="pinPress('0')">0</button>
+      <button class="del" onclick="pinDel()">⌫</button>
+    </div>
+  </div>
+
+  <!-- ── Scanner Screen ────────────────────────────────────── -->
+  <div id="scan-screen">
+    <div class="scan-header">
+      <div class="scan-title">📷 Scan QR Code</div>
+      <button class="lock-btn" onclick="lockScanner()">🔒 Lock</button>
+    </div>
+    <div id="qr-reader"></div>
+    <p style="color:#475569;font-size:12px;margin-top:12px;">Point at the customer's QR code</p>
+  </div>
+
+  <!-- ── Result Overlay ────────────────────────────────────── -->
+  <div id="result-overlay">
+    <div class="result-icon" id="res-icon"></div>
+    <div class="result-name" id="res-name"></div>
+    <div class="result-service" id="res-service"></div>
+    <div class="result-barber" id="res-barber"></div>
+  </div>
+
+<script>
+  let pin = '';
+  let scanner = null;
+  let scanning = false;
+
+  // Load shop name
+  fetch('/api/settings-public').then(r => r.ok ? r.json() : {}).then(d => {
+    if (d.shop_name) document.getElementById('shop-name-label').textContent = d.shop_name;
+  }).catch(() => {});
+
+  function pinPress(digit) {
+    if (pin.length >= 4) return;
+    pin += digit;
+    updateDots();
+    if (pin.length === 4) setTimeout(checkPin, 120);
+  }
+
+  function pinDel() {
+    pin = pin.slice(0, -1);
+    updateDots();
+    document.getElementById('pin-error').textContent = '';
+  }
+
+  function updateDots() {
+    for (let i = 0; i < 4; i++) {
+      document.getElementById('d' + i).classList.toggle('filled', i < pin.length);
+    }
+  }
+
+  async function checkPin() {
+    const res = await fetch('/api/scan/auth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pin }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      showScanner();
+    } else {
+      document.getElementById('pin-error').textContent = '❌ Wrong PIN — try again';
+      pin = '';
+      updateDots();
+    }
+  }
+
+  function showScanner() {
+    document.getElementById('pin-screen').style.display  = 'none';
+    document.getElementById('scan-screen').style.display = 'block';
+    document.getElementById('pin-error').textContent = '';
+    startCamera();
+  }
+
+  function lockScanner() {
+    if (scanner) { scanner.stop().catch(() => {}); scanner = null; }
+    scanning = false;
+    document.getElementById('scan-screen').style.display  = 'none';
+    document.getElementById('pin-screen').style.display   = 'block';
+    pin = ''; updateDots();
+  }
+
+  async function startCamera() {
+    if (scanning) return;
+    scanning = true;
+    try {
+      scanner = new Html5Qrcode('qr-reader');
+      await scanner.start(
+        { facingMode: 'environment' },
+        { fps: 10, qrbox: { width: 230, height: 230 } },
+        async (code) => {
+          if (!scanning) return;
+          scanning = false;
+          try { await scanner.stop(); } catch (e) {}
+          scanner = null;
+          await doCheckin(code.trim().toUpperCase());
+        },
+        () => {}
+      );
+    } catch (err) {
+      document.querySelector('#scan-screen p').textContent = '⚠️ Camera access denied — check browser permissions';
+      scanning = false;
+    }
+  }
+
+  async function doCheckin(code) {
+    const overlay = document.getElementById('result-overlay');
+    try {
+      const res  = await fetch(`/api/scan/checkin/${code}`, { method: 'POST' });
+      const data = await res.json();
+
+      if (data.ok) {
+        showResult('✅', data.customer_name, `${data.service_emoji} ${data.service_name}`, `💈 ${data.employee_name}`, 'result-ok');
+      } else if (data.already) {
+        showResult('ℹ️', data.customer_name, 'Already checked in', '', 'result-warn');
+      } else {
+        showResult('⚠️', data.message || 'Check-in failed', '', '', 'result-warn');
+      }
+    } catch (e) {
+      showResult('❌', 'Code not found', code, '', 'result-error');
+    }
+
+    // Auto-dismiss after 3 seconds, then restart camera
+    setTimeout(() => {
+      overlay.classList.remove('show');
+      scanning = true;
+      startCamera();
+    }, 3000);
+  }
+
+  function showResult(icon, name, service, barber, cls) {
+    const overlay = document.getElementById('result-overlay');
+    document.getElementById('res-icon').textContent    = icon;
+    document.getElementById('res-name').className      = 'result-name ' + cls;
+    document.getElementById('res-name').textContent    = name;
+    document.getElementById('res-service').textContent = service;
+    document.getElementById('res-barber').textContent  = barber;
+    overlay.classList.add('show');
+  }
+</script>
+</body>
+</html>

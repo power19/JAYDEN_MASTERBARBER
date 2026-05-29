@@ -102,12 +102,6 @@
         <span class="w-2.5 h-2.5 rounded-full flex-shrink-0" :class="waStatusLabel.dot"></span>
         <span class="text-white/70 text-xs">WhatsApp: <span x-text="waStatusLabel.text"></span></span>
       </div>
-      <!-- QR Check-In Scanner -->
-      <button @click="startScanner()"
-              class="w-full mb-2 py-2.5 rounded-xl font-bold text-sm transition"
-              style="background:#f59e0b;color:#0f172a">
-        📷 Scan Customer QR
-      </button>
       <button @click="logout()" class="sidebar-link" style="color:rgba(255,255,255,0.55)" onmouseover="this.style.color='#f87171'" onmouseout="this.style.color='rgba(255,255,255,0.55)'">🚪 Sign Out</button>
     </div>
   </aside>
@@ -1487,6 +1481,20 @@
               <span class="text-xs text-slate-500">no-show(s)</span>
             </div>
             <textarea rows="3" x-model="settings.warning_3_message" class="input text-sm" placeholder="Warning 3 message…"></textarea>
+          </div>
+        </div>
+
+        <!-- Barber Scan PIN -->
+        <div class="card space-y-4">
+          <h3 class="font-bold text-slate-700">🔐 Barber Scanner PIN</h3>
+          <p class="text-xs text-slate-400">Barbers use this PIN to unlock the QR scanner at <code class="bg-slate-100 px-1 rounded">/scan</code>. They never see the admin dashboard.</p>
+          <div>
+            <label class="label">PIN Code</label>
+            <input type="text" x-model="settings.barber_scan_pin" class="input w-32 font-mono text-center tracking-widest text-lg" placeholder="1234" maxlength="8">
+            <p class="text-xs text-slate-400 mt-1">Share this PIN with your barbers. Change it anytime from here.</p>
+          </div>
+          <div class="bg-blue-50 border border-blue-200 rounded-xl p-3 text-xs text-blue-700">
+            📱 Barber URL: <span class="font-mono font-semibold" x-text="(settings.shop_url || window.location.origin) + '/scan'"></span>
           </div>
         </div>
 

@@ -90,6 +90,7 @@ function seedIfEmpty() {
     survey_enabled:       '0',
     survey_delay_minutes: '30',
     new_customer_employee_id: '', // barber ID who handles all new customers
+    barber_scan_pin:          '1234', // PIN for the barber-only QR scanner page
     takeover_keyword:     '#human',
     release_keyword:      '#bot',
     cs_phone_1:           '',
