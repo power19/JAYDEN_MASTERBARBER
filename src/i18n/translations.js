@@ -116,6 +116,9 @@ const TRANSLATIONS = {
     booked_header_group:'🎉 *Group Booking Confirmed! ({count} people)*',
     confirm_group:      '👥 Group',
 
+    // Blocked customer
+    customer_blocked: '🚫 Your access to the booking bot has been temporarily restricted. Please contact us directly at *{phone}* to resolve this.',
+
     // Post-appointment survey
     survey_invalid: 'Please reply with a number between *1* and *5*.',
     survey_thanks:  '🙏 *Thank you for your feedback!*\n\n{stars} ({rating}/5)\n\nWe look forward to seeing you again! 💈',
@@ -229,6 +232,9 @@ const TRANSLATIONS = {
     group_follow_up:    'vervolg afspraak',
     booked_header_group:'🎉 *Groepsboeking Bevestigd! ({count} personen)*',
     confirm_group:      '👥 Groep',
+
+    // Blocked customer
+    customer_blocked: '🚫 Uw toegang tot de boekingsbot is tijdelijk beperkt. Neem rechtstreeks contact met ons op via *{phone}*.',
 
     // Post-appointment survey
     survey_invalid: 'Antwoord met een getal tussen *1* en *5*.',
@@ -344,6 +350,9 @@ const TRANSLATIONS = {
     booked_header_group:'🎉 *¡Reserva Grupal Confirmada! ({count} personas)*',
     confirm_group:      '👥 Grupo',
 
+    // Blocked customer
+    customer_blocked: '🚫 Tu acceso al bot de reservas ha sido temporalmente restringido. Contáctanos directamente en *{phone}*.',
+
     // Post-appointment survey
     survey_invalid: 'Por favor responde con un número entre *1* y *5*.',
     survey_thanks:  '🙏 *¡Gracias por tu opinión!*\n\n{stars} ({rating}/5)\n\n¡Esperamos verte pronto! 💈',
@@ -457,6 +466,9 @@ const TRANSLATIONS = {
     group_follow_up:    'suite du rendez-vous',
     booked_header_group:'🎉 *Réservation Groupée Confirmée ! ({count} personnes)*',
     confirm_group:      '👥 Groupe',
+
+    // Blocked customer
+    customer_blocked: '🚫 Votre accès au bot de réservation a été temporairement restreint. Veuillez nous contacter directement au *{phone}*.',
 
     // Post-appointment survey
     survey_invalid: 'Veuillez répondre avec un nombre entre *1* et *5*.',

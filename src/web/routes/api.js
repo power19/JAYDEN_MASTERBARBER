@@ -168,6 +168,33 @@ router.put('/appointments/:id', async (req, res) => {
     const appt = q.getAppointmentById(req.params.id);
     q.updateAppointment(req.params.id, req.body);
 
+    // When status changes to no-show, check warning thresholds and notify customer
+    if (req.body.status === 'no-show' && appt?.customer_phone) {
+      try {
+        const phone    = appt.customer_phone.replace(/\D/g, '');
+        const count    = q.getNoShowCount(appt.customer_phone);
+        const client   = getClient();
+
+        if (client && phone) {
+          for (let i = 1; i <= 3; i++) {
+            const threshold = parseInt(q.getSetting(`warning_${i}_threshold`), 10);
+            const message   = q.getSetting(`warning_${i}_message`) || '';
+            if (threshold > 0 && count === threshold && message) {
+              const text = message
+                .replace(/\{name\}/g,  appt.customer_name || 'there')
+                .replace(/\{count\}/g, count);
+              client.sendMessage(`${phone}@c.us`, text)
+                .catch(e => console.error(`⚠️  Warning ${i} send failed:`, e.message));
+              console.log(`⚠️  No-show warning ${i} sent to ${appt.customer_name} (${count} no-shows)`);
+              break; // only send the first matching warning
+            }
+          }
+        }
+      } catch (e) {
+        console.error('⚠️  No-show warning check failed:', e.message);
+      }
+    }
+
     // When status changes to cancelled, remove the Google Calendar event
     if (req.body.status === 'cancelled' && appt?.google_event_id) {
       const shopCalId = q.getSetting('google_calendar_id') ||
@@ -438,6 +465,50 @@ router.post('/settings/test-calendar', async (req, res) => {
       : e.message;
     res.status(400).json({ error: msg });
   }
+});
+
+// ── Customer Profiles ─────────────────────────────────────────────────────────
+
+router.get('/customers', (req, res) => {
+  try { res.json(q.getAllCustomersWithStats()); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.put('/customers/:id', (req, res) => {
+  try {
+    q.updateCustomer(req.params.id, req.body);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/customers/:id/block', (req, res) => {
+  try {
+    q.blockCustomer(req.params.id, req.body.reason || '');
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/customers/:id/unblock', (req, res) => {
+  try {
+    q.unblockCustomer(req.params.id);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/customers/:id/phones', (req, res) => {
+  try {
+    const phone = (req.body.phone || '').replace(/\D/g, '');
+    if (!phone) return res.status(400).json({ error: 'Phone number required' });
+    q.addPhoneToCustomer(req.params.id, phone);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.delete('/customers/:id/phones/:phone', (req, res) => {
+  try {
+    q.removePhoneFromCustomer(req.params.id, req.params.phone);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ── Human Takeover ────────────────────────────────────────────────────────────

@@ -68,6 +68,7 @@
       <button @click="nav('hours')"       :class="page==='hours'       ? 'active' : ''" class="sidebar-link w-full text-left">⏰ Work Hours</button>
       <button @click="nav('blocks')"      :class="page==='blocks'      ? 'active' : ''" class="sidebar-link w-full text-left">🚫 Closed Dates</button>
       <button @click="nav('services')"    :class="page==='services'    ? 'active' : ''" class="sidebar-link w-full text-left">✂️ Services</button>
+      <button @click="nav('customers')"   :class="page==='customers'   ? 'active' : ''" class="sidebar-link w-full text-left">👤 Customers</button>
       <button @click="nav('messages')"    :class="page==='messages'    ? 'active' : ''" class="sidebar-link w-full text-left">✉️ Bot Messages</button>
       <button @click="nav('settings')"    :class="page==='settings'    ? 'active' : ''" class="sidebar-link w-full text-left">⚙️ Settings</button>
     </nav>
@@ -246,6 +247,16 @@
       <!-- Filters -->
       <div class="card mb-6">
         <div class="flex flex-wrap gap-4">
+          <!-- Search -->
+          <div class="flex-1 min-w-52">
+            <label class="label">Search</label>
+            <div class="relative">
+              <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">🔍</span>
+              <input type="text" x-model="apptSearch"
+                     class="input pl-8 w-full"
+                     placeholder="Name, booking code, phone…">
+            </div>
+          </div>
           <div>
             <label class="label">Date</label>
             <input type="date" x-model="apptFilter.date" @change="loadAppointments()" class="input w-44">
@@ -270,13 +281,22 @@
             </select>
           </div>
           <div class="flex items-end">
-            <button @click="apptFilter={date:'',employee_id:'',status:''}; loadAppointments()" class="btn-secondary">Clear</button>
+            <button @click="apptFilter={date:'',employee_id:'',status:''}; apptSearch=''; loadAppointments()" class="btn-secondary">Clear</button>
           </div>
         </div>
       </div>
 
       <div class="card">
-        <div x-show="appointments.length === 0" class="text-slate-400 text-center py-8">No appointments found</div>
+        <div x-show="appointments.filter(a => {
+              const q = apptSearch.toLowerCase();
+              return !q ||
+                (a.customer_name  || '').toLowerCase().includes(q) ||
+                (a.booking_code   || '').toLowerCase().includes(q) ||
+                (a.customer_phone || '').toLowerCase().includes(q) ||
+                (a.service_name   || '').toLowerCase().includes(q) ||
+                (a.employee_name  || '').toLowerCase().includes(q);
+            }).length === 0"
+             class="text-slate-400 text-center py-8">No appointments found</div>
         <div class="overflow-x-auto">
           <table x-show="appointments.length > 0" class="w-full text-sm">
             <thead>
@@ -292,7 +312,15 @@
               </tr>
             </thead>
             <tbody class="divide-y divide-slate-50">
-              <template x-for="a in appointments" :key="a.id">
+              <template x-for="a in appointments.filter(a => {
+                  const q = apptSearch.toLowerCase();
+                  return !q ||
+                    (a.customer_name  || '').toLowerCase().includes(q) ||
+                    (a.booking_code   || '').toLowerCase().includes(q) ||
+                    (a.customer_phone || '').toLowerCase().includes(q) ||
+                    (a.service_name   || '').toLowerCase().includes(q) ||
+                    (a.employee_name  || '').toLowerCase().includes(q);
+                })" :key="a.id">
                 <tr class="hover:bg-slate-50">
                   <td class="py-3 font-mono text-xs" x-text="fmtDateTime(a.start_time)"></td>
                   <td class="py-3">
@@ -897,6 +925,112 @@
       </div>
     </div>
 
+    <!-- ── CUSTOMERS ─────────────────────────────────────────────── -->
+    <div x-show="page === 'customers'" class="p-8">
+      <div class="flex justify-between items-center mb-6">
+        <h2 class="text-2xl font-bold text-slate-800">👤 Customers</h2>
+        <div class="flex gap-2">
+          <button @click="customerFilter='all'"     :class="customerFilter==='all'     ? 'btn-primary' : 'btn-secondary'" class="text-xs py-1.5 px-3">All</button>
+          <button @click="customerFilter='noshows'" :class="customerFilter==='noshows' ? 'btn-primary' : 'btn-secondary'" class="text-xs py-1.5 px-3">⚠️ No-Shows</button>
+          <button @click="customerFilter='blocked'" :class="customerFilter==='blocked' ? 'btn-primary' : 'btn-secondary'" class="text-xs py-1.5 px-3">🚫 Blocked</button>
+        </div>
+      </div>
+
+      <div x-show="customers.length === 0" class="card text-center text-slate-400 py-12">
+        No customers yet — they appear here automatically after their first booking.
+      </div>
+
+      <div class="space-y-4">
+        <template x-for="c in filteredCustomers()" :key="c.id">
+          <div class="card"
+               :class="c.is_blocked ? 'border-red-200 bg-red-50' : c.no_show_count > 0 ? 'border-amber-200 bg-amber-50' : ''">
+
+            <!-- Header row -->
+            <div class="flex items-start justify-between gap-4">
+              <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-full bg-slate-200 flex items-center justify-center font-bold text-slate-600 flex-shrink-0"
+                     x-text="(c.name || '?')[0].toUpperCase()"></div>
+                <div>
+                  <div class="font-semibold text-slate-800" x-text="c.name || '(unnamed)'"></div>
+                  <div class="flex items-center gap-2 mt-0.5 flex-wrap">
+                    <span x-show="c.is_blocked" class="text-xs font-bold text-red-600">🚫 BLOCKED</span>
+                    <span x-show="c.block_reason && c.is_blocked" class="text-xs text-red-400 italic" x-text="'— ' + c.block_reason"></span>
+                    <span x-show="!c.is_blocked && c.no_show_count > 0" class="text-xs font-semibold text-amber-600" x-text="'⚠️ ' + c.no_show_count + ' no-show(s)'"></span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Stats -->
+              <div class="flex items-center gap-4 text-xs text-slate-500 flex-shrink-0">
+                <div class="text-center">
+                  <div class="font-bold text-slate-700 text-base" x-text="c.total_bookings"></div>
+                  <div>bookings</div>
+                </div>
+                <div class="text-center">
+                  <div class="font-bold text-amber-600 text-base" x-text="c.no_show_count"></div>
+                  <div>no-shows</div>
+                </div>
+                <div class="text-center">
+                  <div class="font-bold text-emerald-600 text-base" x-text="c.avg_rating ? '⭐ ' + c.avg_rating : '—'"></div>
+                  <div>avg rating</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Phone numbers -->
+            <div class="mt-3">
+              <div class="text-xs font-medium text-slate-500 mb-1">📱 Registered numbers:</div>
+              <div class="flex flex-wrap gap-2">
+                <template x-for="phone in (c.phones || [])" :key="phone">
+                  <div class="flex items-center gap-1 bg-slate-100 rounded-lg px-2 py-1 text-xs font-mono">
+                    <span x-text="phone"></span>
+                    <button @click="removePhone(c.id, phone)" x-show="(c.phones || []).length > 1"
+                            class="text-slate-400 hover:text-red-500 ml-1 leading-none"
+                            title="Remove this number">✕</button>
+                  </div>
+                </template>
+              </div>
+              <!-- Link new number -->
+              <div class="flex items-center gap-2 mt-2">
+                <input type="text"
+                       :value="addPhoneInputs[c.id] || ''"
+                       @input="addPhoneInputs[c.id] = $event.target.value"
+                       class="input text-xs py-1 w-44"
+                       placeholder="+597 XXX-XXXX (link another number)">
+                <button @click="addPhone(c.id)" class="btn-secondary text-xs py-1 px-3">+ Link</button>
+              </div>
+            </div>
+
+            <!-- Notes -->
+            <div class="mt-3">
+              <textarea rows="1" placeholder="Notes…"
+                :value="c.notes || ''"
+                @change="api('PUT', `/api/customers/${c.id}`, { notes: $event.target.value }).then(() => {})"
+                class="input text-xs py-1 w-full resize-none"></textarea>
+            </div>
+
+            <!-- Actions -->
+            <div class="mt-3 flex items-center gap-2 flex-wrap">
+              <template x-if="!c.is_blocked">
+                <div class="flex items-center gap-2">
+                  <input type="text"
+                         :value="blockReasonInputs[c.id] || ''"
+                         @input="blockReasonInputs[c.id] = $event.target.value"
+                         class="input text-xs py-1 w-44"
+                         placeholder="Block reason (optional)">
+                  <button @click="blockCustomer(c.id)" class="btn-danger text-xs py-1 px-3">🚫 Block</button>
+                </div>
+              </template>
+              <template x-if="c.is_blocked">
+                <button @click="unblockCustomer(c.id)" class="btn-primary text-xs py-1 px-3">✅ Restore Access</button>
+              </template>
+            </div>
+
+          </div>
+        </template>
+      </div>
+    </div>
+
     <!-- ── BOT MESSAGES ──────────────────────────────────────────── -->
     <div x-show="page === 'messages'" class="p-8">
       <div class="flex justify-between items-center mb-6">
@@ -1087,6 +1221,48 @@
               <p class="text-xs text-slate-400">
                 💬 Edit the reminder message text in <button @click="nav('messages')" class="text-amber-500 underline">Bot Messages</button>.
               </p>
+            </div>
+          </div>
+
+          <!-- ── No-Show Warnings ───────────────────────────────────────────────── -->
+          <div class="card">
+            <h3 class="font-bold text-slate-700 mb-1">🚫 No-Show Warnings</h3>
+            <p class="text-xs text-slate-400 mb-4">Automatically sends a WhatsApp warning to the customer when their no-show count reaches the threshold. Use <code class="bg-slate-100 px-1 rounded">{name}</code> and <code class="bg-slate-100 px-1 rounded">{count}</code> as placeholders.</p>
+            <div class="space-y-4">
+
+              <!-- Warning 1 -->
+              <div class="border border-amber-200 bg-amber-50 rounded-xl p-4 space-y-3">
+                <div class="flex items-center gap-3">
+                  <span class="text-sm font-bold text-amber-700">⚠️ Warning 1</span>
+                  <span class="text-xs text-slate-500">After</span>
+                  <input type="number" x-model="settings.warning_1_threshold" class="input w-16 text-center" min="1" max="20">
+                  <span class="text-xs text-slate-500">no-show(s)</span>
+                </div>
+                <textarea rows="3" x-model="settings.warning_1_message" class="input text-sm" placeholder="Warning 1 message…"></textarea>
+              </div>
+
+              <!-- Warning 2 -->
+              <div class="border border-orange-200 bg-orange-50 rounded-xl p-4 space-y-3">
+                <div class="flex items-center gap-3">
+                  <span class="text-sm font-bold text-orange-700">🔶 Warning 2</span>
+                  <span class="text-xs text-slate-500">After</span>
+                  <input type="number" x-model="settings.warning_2_threshold" class="input w-16 text-center" min="1" max="20">
+                  <span class="text-xs text-slate-500">no-show(s)</span>
+                </div>
+                <textarea rows="3" x-model="settings.warning_2_message" class="input text-sm" placeholder="Warning 2 message…"></textarea>
+              </div>
+
+              <!-- Warning 3 -->
+              <div class="border border-red-200 bg-red-50 rounded-xl p-4 space-y-3">
+                <div class="flex items-center gap-3">
+                  <span class="text-sm font-bold text-red-700">🚫 Warning 3</span>
+                  <span class="text-xs text-slate-500">After</span>
+                  <input type="number" x-model="settings.warning_3_threshold" class="input w-16 text-center" min="1" max="20">
+                  <span class="text-xs text-slate-500">no-show(s)</span>
+                </div>
+                <textarea rows="3" x-model="settings.warning_3_message" class="input text-sm" placeholder="Warning 3 message…"></textarea>
+              </div>
+
             </div>
           </div>
 
@@ -1331,7 +1507,14 @@ function app() {
     weeklyHours: [],
     hoursLoading: false,
     apptFilter: { date: '', employee_id: '', status: '' },
+    apptSearch: '',
     selectedHoursEmployee: null,
+
+    // Customer profiles
+    customers: [],
+    customerFilter: 'all',  // 'all' | 'noshows' | 'blocked'
+    addPhoneInputs: {},      // { customerId: phoneValue }
+    blockReasonInputs: {},   // { customerId: reasonValue }
 
     // Human takeover — paused chats
     pausedChats: [],
@@ -1476,6 +1659,7 @@ function app() {
       if (p === 'hours')        await this.loadHours();
       if (p === 'blocks')       await this.loadBlocks();
       if (p === 'services')     this.services = await this.api('GET', '/api/services');
+      if (p === 'customers')    this.customers   = await this.api('GET', '/api/customers');
       if (p === 'messages')     this.botMessages = await this.api('GET', '/api/messages');
       if (p === 'settings') {
         this.settings = await this.api('GET', '/api/settings');
@@ -1693,6 +1877,36 @@ function app() {
     async toggleEmployee(id) {
       await this.api('POST', `/api/employees/${id}/toggle`);
       this.employees = await this.api('GET', '/api/employees');
+    },
+
+    // ── Customer management ───────────────────────────────────────────────────
+    filteredCustomers() {
+      if (this.customerFilter === 'noshows') return this.customers.filter(c => c.no_show_count > 0);
+      if (this.customerFilter === 'blocked')  return this.customers.filter(c => c.is_blocked);
+      return this.customers;
+    },
+    async blockCustomer(id) {
+      const reason = this.blockReasonInputs[id] || '';
+      await this.api('POST', `/api/customers/${id}/block`, { reason });
+      this.customers = await this.api('GET', '/api/customers');
+      this.showToast('🚫 Customer blocked');
+    },
+    async unblockCustomer(id) {
+      await this.api('POST', `/api/customers/${id}/unblock`);
+      this.customers = await this.api('GET', '/api/customers');
+      this.showToast('✅ Customer unblocked');
+    },
+    async addPhone(id) {
+      const phone = (this.addPhoneInputs[id] || '').replace(/\D/g, '');
+      if (!phone) return;
+      await this.api('POST', `/api/customers/${id}/phones`, { phone });
+      this.addPhoneInputs[id] = '';
+      this.customers = await this.api('GET', '/api/customers');
+      this.showToast('📱 Phone number linked');
+    },
+    async removePhone(id, phone) {
+      await this.api('DELETE', `/api/customers/${id}/phones/${phone}`);
+      this.customers = await this.api('GET', '/api/customers');
     },
 
     async releaseChat(chatId) {

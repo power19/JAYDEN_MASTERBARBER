@@ -253,6 +253,10 @@ const markSurveySent = (id) =>
 const saveRating = (id, rating) =>
   db.appointments.updateById(id, { rating: parseInt(rating, 10) });
 
+/** Count total no-show appointments for a customer phone number. */
+const getNoShowCount = (phone) =>
+  db.appointments.count(a => a.customer_phone === phone && a.status === 'no-show');
+
 /**
  * Returns true if the phone number has NO previous non-cancelled appointments.
  * Used by the bot to detect first-time customers and show a warm welcome.
@@ -281,6 +285,87 @@ function updateAppointment(id, { status, notes, google_event_id, google_event_li
   if (reminder_sent      != null) updates.reminder_sent      = reminder_sent;
   return db.appointments.updateById(id, updates);
 }
+
+// ── Customer profiles ─────────────────────────────────────────────────────────
+
+/** Find a customer whose phones array contains this number. */
+const getCustomerByPhone = (phone) =>
+  db.customers.findOne(c => Array.isArray(c.phones) && c.phones.includes(phone));
+
+/** Return all customers, sorted by name. */
+const getAllCustomers = () =>
+  db.customers.find().sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+
+/**
+ * Returns every customer enriched with live stats from the appointments collection.
+ * Used by the dashboard Customers page.
+ */
+function getAllCustomersWithStats() {
+  return getAllCustomers().map(c => {
+    const phones   = c.phones || [];
+    const appts    = db.appointments.find(a => phones.includes(a.customer_phone));
+    const noShows  = appts.filter(a => a.status === 'no-show').length;
+    const bookings = appts.filter(a => a.status !== 'cancelled').length;
+    const ratings  = appts.map(a => a.rating).filter(Boolean);
+    const avgRating = ratings.length
+      ? (ratings.reduce((s, r) => s + r, 0) / ratings.length).toFixed(1)
+      : null;
+    return { ...c, total_bookings: bookings, no_show_count: noShows, avg_rating: avgRating };
+  });
+}
+
+/**
+ * Look up a customer by phone. If not found, create a new record.
+ * Returns the customer record (existing or newly created).
+ */
+function getOrCreateCustomer(name, phone) {
+  const existing = getCustomerByPhone(phone);
+  if (existing) {
+    // Update name if the existing record has none
+    if (!existing.name && name) db.customers.updateById(existing.id, { name });
+    return db.customers.findOne(c => String(c.id) === String(existing.id));
+  }
+  db.customers.insert({ name: name || '', phones: [phone], is_blocked: 0, block_reason: '', notes: '' });
+  return getCustomerByPhone(phone);
+}
+
+/** Add an extra phone number to an existing customer (for linked accounts). */
+function addPhoneToCustomer(id, phone) {
+  const customer = db.customers.findOne(c => String(c.id) === String(id));
+  if (!customer) return;
+  const phones = customer.phones || [];
+  if (phones.includes(phone)) return; // already linked
+  db.customers.updateById(id, { phones: [...phones, phone] });
+}
+
+/** Remove a phone number from a customer's linked list. */
+function removePhoneFromCustomer(id, phone) {
+  const customer = db.customers.findOne(c => String(c.id) === String(id));
+  if (!customer) return;
+  const phones = (customer.phones || []).filter(p => p !== phone);
+  db.customers.updateById(id, { phones });
+}
+
+/** Block a customer (all their linked numbers are affected). */
+const blockCustomer   = (id, reason = '') =>
+  db.customers.updateById(id, { is_blocked: 1, block_reason: reason });
+
+/** Unblock a customer. */
+const unblockCustomer = (id) =>
+  db.customers.updateById(id, { is_blocked: 0, block_reason: '' });
+
+/** Update notes / name on a customer record. */
+const updateCustomer  = (id, data) =>
+  db.customers.updateById(id, data);
+
+/**
+ * Returns true if a given phone number belongs to a blocked customer.
+ * Used in the bot entry point to silently drop messages.
+ */
+const isPhoneBlocked = (phone) => {
+  const c = getCustomerByPhone(phone);
+  return c?.is_blocked === 1;
+};
 
 // ── Blocked dates / time-off ──────────────────────────────────────────────────
 
@@ -525,7 +610,10 @@ module.exports = {
   getAppointments, getTodayAppointments, getDashboardStats,
   createAppointment, updateAppointment,
   getAppointmentByCode, getAppointmentById, cancelAppointment, rescheduleAppointment, isNewCustomer,
-  getUnsurveyedAppointments, markSurveySent, saveRating,
+  getUnsurveyedAppointments, markSurveySent, saveRating, getNoShowCount,
   getAvailableSlotsForEmployee, getAvailableSlotsForAny, getAvailableSlotsForGroup, pickLeastBusyEmployee, getAvailableDates,
   getBlocks, addBlock, deleteBlock,
+  getCustomerByPhone, getAllCustomers, getAllCustomersWithStats,
+  getOrCreateCustomer, addPhoneToCustomer, removePhoneFromCustomer,
+  blockCustomer, unblockCustomer, updateCustomer, isPhoneBlocked,
 };

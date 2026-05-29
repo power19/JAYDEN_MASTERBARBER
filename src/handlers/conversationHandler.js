@@ -78,6 +78,14 @@ async function handleMessage(message) {
   // Human takeover — bot is completely silent for this chat
   if (chatPause.isChatPaused(userId)) return null;
 
+  // Blocked customer — silently drop (or send a polite refusal)
+  const customerPhone = userId.replace(/@\S+$/, '');
+  if (q.isPhoneBlocked(customerPhone)) {
+    const lang = sessions.getSession(userId).language || 'en';
+    const mgmt = q.getSetting('shop_phone') || '';
+    return t(lang, 'customer_blocked', { phone: mgmt || 'us directly' });
+  }
+
   // Bot paused?
   if (q.getSetting('bot_paused') === '1') {
     const msg = (q.getBotMessage('bot_paused_message') || '😊 We are currently unavailable.')
@@ -182,12 +190,14 @@ function onSelectLanguage(userId, text, session, isMyContact = null) {
     return buildLanguageMenu();
   }
 
-  // Primary: contact-based — number NOT saved in barber's phone = new customer.
-  // Fallback: appointment-based — used when getContact() failed (isMyContact === null).
-  const phone  = userId.replace(/@\S+$/, '');
-  const isNew  = isMyContact === null
-    ? q.isNewCustomer(phone)  // fallback: no prior appointments = new
-    : !isMyContact;           // primary: not in barber's contacts = new
+  // New vs returning: check our own customer profiles DB.
+  // A customer record is created on first booking confirmation.
+  // isMyContact (WhatsApp contact list) is used as a fallback only when
+  // our DB has no record yet (e.g., first-ever session before any booking).
+  const phone      = userId.replace(/@\S+$/, '');
+  const hasProfile = !!q.getCustomerByPhone(phone);
+  const isNew      = hasProfile ? false
+    : (isMyContact === null ? q.isNewCustomer(phone) : !isMyContact);
 
   sessions.updateSession(userId, { state: 'MAIN_MENU', language: lang, isNewCustomer: isNew });
 
@@ -286,7 +296,7 @@ async function onGroupSize(userId, text, session) {
 
   const { employees, selectedService } = session;
   // Allow up to 2× the barber count (overflow), hard-capped at 6
-  const maxAllowed = Math.min(employees.length * 2, 6);
+  const maxAllowed = Math.min(employees.length * 2, 4);
   const n = parseInt(text, 10);
 
   if (isNaN(n) || n < 1 || n > maxAllowed) {
@@ -605,6 +615,9 @@ async function onConfirm(userId, text, session) {
     shopAddress:     q.getSetting('shop_address') || '',
     shopPhone:       q.getSetting('shop_phone')   || '',
   });
+
+  // ── Register / update customer profile ───────────────────────────────────
+  q.getOrCreateCustomer(userName, customerPhone);
 
   // ── CS / notification number forwarding ──────────────────────────────────
   const isNewCust = session.isNewCustomer;
@@ -985,7 +998,7 @@ function buildServiceList(lang) {
 }
 
 function buildGroupSizeMenu(lang, service, maxBarbers) {
-  // Allow up to 2× barbers (overflow), hard cap at 6
+  // Allow up to 2× barbers (overflow), hard cap at 4
   const maxAllowed = Math.min(maxBarbers * 2, 6);
   const lines = [];
   for (let i = 1; i <= maxAllowed; i++) {

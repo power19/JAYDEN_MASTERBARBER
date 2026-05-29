@@ -16,6 +16,7 @@ const db = {
   appointments:  new JsonCollection(path.join(DATA_DIR, 'appointments.json')),
   botMessages:   new JsonCollection(path.join(DATA_DIR, 'bot_messages.json')),
   blockedDates:  new JsonCollection(path.join(DATA_DIR, 'blocked_dates.json')),
+  customers:     new JsonCollection(path.join(DATA_DIR, 'customers.json')),
   settings:      new JsonKVStore(path.join(DATA_DIR, 'settings.json')),
 };
 
@@ -90,6 +91,12 @@ function seedIfEmpty() {
     release_keyword:      '#bot',
     cs_phone_1:           '',
     cs_phone_2:           '',
+    warning_1_threshold:  '1',
+    warning_1_message:    '⚠️ Hi {name}, we noticed you missed your appointment. Please remember to cancel in advance if you can\'t make it. We look forward to seeing you soon! 💈',
+    warning_2_threshold:  '2',
+    warning_2_message:    '⚠️ Hi {name}, this is your second missed appointment. Repeated no-shows make it harder for us to serve other customers. Please cancel in advance when needed.',
+    warning_3_threshold:  '3',
+    warning_3_message:    '🚫 Hi {name}, after {count} missed appointments your booking privileges may be restricted. Please contact us directly to discuss.',
   };
   Object.entries(settingDefaults).forEach(([k, v]) => {
     if (!db.settings.has(k)) db.settings.set(k, v);
