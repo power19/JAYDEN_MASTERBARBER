@@ -1811,7 +1811,10 @@ function app() {
       if (p === 'blocks') {
         this.holidayPreview = await this.api('GET', `/api/holidays/${this.holidayYear}`);
       }
-      if (p === 'leave')        await this.loadLeaves();
+      if (p === 'leave') {
+        this.leaveMonth = new Date().toISOString().slice(0, 7); // always open on current month
+        await this.loadLeaves();
+      }
       if (p === 'customers')    this.customers   = await this.api('GET', '/api/customers');
       if (p === 'messages')     this.botMessages = await this.api('GET', '/api/messages');
       if (p === 'settings') {
