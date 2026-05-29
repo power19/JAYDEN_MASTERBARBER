@@ -4,6 +4,18 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Barbershop Admin</title>
+
+  <!-- PWA -->
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#f59e0b">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Barbershop">
+  <link rel="apple-touch-icon" href="/icons/icon.svg">
+
+  <!-- QR Scanner library -->
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+
   <script src="https://cdn.tailwindcss.com"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
   <style>
@@ -90,6 +102,12 @@
         <span class="w-2.5 h-2.5 rounded-full flex-shrink-0" :class="waStatusLabel.dot"></span>
         <span class="text-white/70 text-xs">WhatsApp: <span x-text="waStatusLabel.text"></span></span>
       </div>
+      <!-- QR Check-In Scanner -->
+      <button @click="startScanner()"
+              class="w-full mb-2 py-2.5 rounded-xl font-bold text-sm transition"
+              style="background:#f59e0b;color:#0f172a">
+        📷 Scan Customer QR
+      </button>
       <button @click="logout()" class="sidebar-link" style="color:rgba(255,255,255,0.55)" onmouseover="this.style.color='#f87171'" onmouseout="this.style.color='rgba(255,255,255,0.55)'">🚪 Sign Out</button>
     </div>
   </aside>
@@ -376,6 +394,24 @@
         </div>
       </div>
     </div>
+
+    <!-- ── QR SCANNER MODAL ───────────────────────────────────────── -->
+    <template x-if="showScanModal">
+      <div class="fixed inset-0 z-50 flex items-center justify-center p-4" style="background:rgba(0,0,0,0.8)">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
+          <div class="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+            <h3 class="text-lg font-bold text-slate-800">📷 Scan Customer QR</h3>
+            <button @click="stopScanner()" class="text-slate-400 hover:text-slate-600 text-2xl leading-none">&times;</button>
+          </div>
+          <!-- Camera viewfinder -->
+          <div id="qr-reader" class="w-full" x-init="$nextTick(() => initScanner())"></div>
+          <div class="px-5 py-3 text-center">
+            <p class="text-xs text-slate-400" x-show="!scanError">Point the camera at the customer's QR code</p>
+            <p class="text-sm text-red-500 font-medium" x-show="scanError" x-text="scanError"></p>
+          </div>
+        </div>
+      </div>
+    </template>
 
     <!-- ── QR CHECK-IN MODAL ──────────────────────────────────────── -->
     <template x-if="showQRModal">
@@ -1717,11 +1753,16 @@ function app() {
     calendarTestTz:     '',
     calendarTestError:  '',
 
-    // QR Check-In modal
+    // QR Check-In modal (show QR for a specific appointment)
     showQRModal: false,
     qrLoading:   false,
     qrData:      null,
     qrAppt:      null,
+
+    // QR Scanner modal (barber scans customer's QR)
+    showScanModal: false,
+    scanError:     '',
+    _scanner:      null,
 
     // Settings tabs
     settingsTab: 'shop',
@@ -2173,6 +2214,56 @@ function app() {
       this.customers = await this.api('GET', '/api/customers');
     },
 
+    // ── QR Scanner (barber scans customer's QR code) ──────────────────────────
+    startScanner() {
+      this.scanError     = '';
+      this.showScanModal = true;
+      // initScanner() is called via x-init on the modal div after DOM renders
+    },
+    async initScanner() {
+      try {
+        this._scanner = new Html5Qrcode('qr-reader');
+        await this._scanner.start(
+          { facingMode: 'environment' },
+          { fps: 10, qrbox: { width: 220, height: 220 } },
+          async (decodedText) => {
+            // Got a code — stop scanner and process
+            try { await this._scanner.stop(); } catch (e) {}
+            this._scanner = null;
+            this.showScanModal = false;
+            await this.processCheckin(decodedText.trim().toUpperCase());
+          },
+          () => {} // ignore per-frame decode errors
+        );
+      } catch (err) {
+        this.scanError = 'Camera access denied — please allow camera permissions and try again.';
+      }
+    },
+    async stopScanner() {
+      if (this._scanner) {
+        try { await this._scanner.stop(); } catch (e) {}
+        this._scanner = null;
+      }
+      this.showScanModal = false;
+    },
+    async processCheckin(code) {
+      try {
+        const result = await this.api('POST', `/api/checkin/${code}`);
+        if (result.ok) {
+          this.showToast(`✅ ${result.customer_name} — ${result.service_emoji} ${result.service_name} — Checked in!`);
+        } else if (result.already) {
+          this.showToast(`ℹ️ ${result.customer_name} was already checked in`);
+        } else {
+          this.showToast(`⚠️ ${result.message || 'Check-in failed'}`);
+        }
+        // Refresh whichever page is active
+        if (this.page === 'appointments') await this.loadAppointments();
+        if (this.page === 'dashboard')    await this.loadDashboard();
+      } catch (e) {
+        this.showToast('❌ Code not found — make sure you scanned the correct QR');
+      }
+    },
+
     async showQR(appt) {
       this.qrAppt    = appt;
       this.qrData    = null;
@@ -2434,6 +2525,13 @@ function app() {
       }
     },
   };
+}
+
+// Register service worker (enables PWA install)
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {});
+  });
 }
 </script>
 </body>

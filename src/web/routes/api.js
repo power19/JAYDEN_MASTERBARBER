@@ -96,10 +96,31 @@ router.get('/checkin/:code', (req, res) => {
   if (appt.status === 'no-show')
     return res.send(page('👻', 'Marked No-Show', 'This appointment was recorded as a no-show.', apptDetail(appt), '#f59e0b'));
 
-  // Mark as completed
-  q.updateAppointment(appt.id, { status: 'completed' });
-  console.log(`✅ Check-in: ${appt.customer_name} — ${appt.booking_code}`);
-  return res.send(page('✅', 'Checked In!', `Welcome, ${appt.customer_name}! See you inside. 💈`, apptDetail(appt), '#10b981'));
+  // Info-only — no status change (check-in requires the authenticated dashboard scanner)
+  return res.send(page('📋', 'Appointment Info', `Show this QR to your barber on arrival.`, apptDetail(appt), '#f59e0b'));
+});
+
+/** Authenticated check-in — called by the dashboard scanner only. */
+router.post('/checkin/:code', requireAuth, (req, res) => {
+  try {
+    const appt = q.getAppointmentByCode(req.params.code);
+    if (!appt) return res.status(404).json({ ok: false, message: 'Booking code not found' });
+    if (appt.status === 'cancelled') return res.json({ ok: false, message: 'This appointment was cancelled' });
+    if (appt.status === 'no-show')   return res.json({ ok: false, message: 'Marked as no-show' });
+    if (appt.status === 'completed') return res.json({ ok: false, already: true, message: 'Already checked in', customer_name: appt.customer_name, service_name: appt.service_name, service_emoji: appt.service_emoji || '✂️' });
+
+    q.updateAppointment(appt.id, { status: 'completed' });
+    const employee = appt.employee_id ? q.getEmployee(appt.employee_id) : null;
+    console.log(`✅ Check-in: ${appt.customer_name} — ${appt.booking_code}`);
+    res.json({
+      ok:            true,
+      customer_name: appt.customer_name,
+      service_name:  appt.service_name,
+      service_emoji: appt.service_emoji || '✂️',
+      employee_name: employee?.name || appt.employee_name || '—',
+      booking_code:  appt.booking_code,
+    });
+  } catch (e) { res.status(500).json({ ok: false, message: e.message }); }
 });
 
 /** Returns a QR code PNG (base64) for an appointment's check-in URL. */

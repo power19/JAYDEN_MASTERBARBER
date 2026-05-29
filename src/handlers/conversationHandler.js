@@ -630,22 +630,23 @@ async function onConfirm(userId, text, session) {
   q.getOrCreateCustomer(userName, customerPhone);
 
   // ── Send QR check-in code to customer (best-effort, non-blocking) ─────────
+  // QR encodes only the booking code — check-in happens via the authenticated
+  // dashboard scanner. Customers cannot self-check-in by scanning their own QR.
   try {
-    const shopUrl  = (q.getSetting('shop_url') || '').replace(/\/$/, '');
-    if (shopUrl && mainBookings.length > 0) {
-      const { getClient } = require('../whatsapp-client');
-      const { MessageMedia } = require('whatsapp-web.js');
-      const QRCode = require('qrcode');
-      const wClient = getClient();
-      if (wClient) {
-        for (const booking of [...mainBookings, ...overflowBookings]) {
-          const checkUrl  = `${shopUrl}/api/checkin/${booking.code}`;
-          const qrDataUrl = await QRCode.toDataURL(checkUrl, { width: 300, margin: 2, color: { dark: '#0f172a', light: '#ffffff' } });
-          const base64    = qrDataUrl.split(',')[1];
-          const media     = new MessageMedia('image/png', base64, `checkin-${booking.code}.png`);
-          const caption   = `🔲 *Check-In QR — ${booking.code}*\n_Show this to your barber when you arrive._`;
-          await wClient.sendMessage(`${customerPhone}@c.us`, media, { caption });
-        }
+    const { getClient }   = require('../whatsapp-client');
+    const { MessageMedia } = require('whatsapp-web.js');
+    const QRCode  = require('qrcode');
+    const wClient = getClient();
+    if (wClient) {
+      for (const booking of [...mainBookings, ...overflowBookings]) {
+        const qrDataUrl = await QRCode.toDataURL(booking.code, {
+          width: 300, margin: 2,
+          color: { dark: '#0f172a', light: '#ffffff' },
+        });
+        const base64  = qrDataUrl.split(',')[1];
+        const media   = new MessageMedia('image/png', base64, `checkin-${booking.code}.png`);
+        const caption = `🔲 *Check-in code: ${booking.code}*\n_Show this to your barber when you arrive. They will scan it to confirm your visit._`;
+        await wClient.sendMessage(`${customerPhone}@c.us`, media, { caption });
       }
     }
   } catch (e) {

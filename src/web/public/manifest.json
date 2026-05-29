@@ -1,0 +1,13 @@
+{
+  "name": "Jayden's Barbershop",
+  "short_name": "Barbershop",
+  "description": "Admin dashboard & QR check-in scanner",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0f172a",
+  "theme_color": "#f59e0b",
+  "icons": [
+    { "src": "/icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
