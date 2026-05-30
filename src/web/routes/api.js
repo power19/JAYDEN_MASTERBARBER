@@ -739,6 +739,62 @@ router.delete('/leaves/:id', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── Photo Gallery ─────────────────────────────────────────────────────────────
+
+const fs_api   = require('fs');
+const path_api = require('path');
+const UPLOADS  = path_api.join(process.cwd(), 'data', 'uploads');
+
+router.get('/photos', requireAuth, (req, res) => {
+  try {
+    const photos = q.getPhotos(req.query.tag || null);
+    res.json(photos);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.get('/photos/tags', requireAuth, (req, res) => {
+  try { res.json(q.getPhotoTags()); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/photos', requireAuth, (req, res) => {
+  try {
+    const { base64, filename, tags, caption } = req.body;
+    if (!base64 || !filename) return res.status(400).json({ error: 'base64 and filename required' });
+
+    const ext        = (filename.split('.').pop() || 'jpg').toLowerCase();
+    const uniqueName = `${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+    const filepath   = path_api.join(UPLOADS, uniqueName);
+    const data       = base64.includes(',') ? base64.split(',')[1] : base64;
+
+    fs_api.writeFileSync(filepath, Buffer.from(data, 'base64'));
+
+    const tagArr = (typeof tags === 'string' ? tags.split(',') : (tags || []));
+    const photo  = q.addPhoto({ filename: uniqueName, originalName: filename, tags: tagArr, caption });
+    res.json({ ok: true, photo });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.put('/photos/:id', requireAuth, (req, res) => {
+  try {
+    q.updatePhoto(req.params.id, req.body);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.delete('/photos/:id', requireAuth, (req, res) => {
+  try {
+    const photos = q.getPhotos();
+    const photo  = photos.find(p => String(p.id) === String(req.params.id));
+    if (photo) {
+      const filepath = path_api.join(UPLOADS, photo.filename);
+      if (fs_api.existsSync(filepath)) fs_api.unlinkSync(filepath);
+    }
+    q.deletePhoto(req.params.id);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── Surinamese Public Holidays ────────────────────────────────────────────────
 
 router.get('/holidays/:year', (req, res) => {

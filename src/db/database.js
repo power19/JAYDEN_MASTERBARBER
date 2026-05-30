@@ -17,6 +17,7 @@ const db = {
   botMessages:   new JsonCollection(path.join(DATA_DIR, 'bot_messages.json')),
   blockedDates:  new JsonCollection(path.join(DATA_DIR, 'blocked_dates.json')),
   customers:     new JsonCollection(path.join(DATA_DIR, 'customers.json')),
+  photos:        new JsonCollection(path.join(DATA_DIR, 'photos.json')),
   leaves:        new JsonCollection(path.join(DATA_DIR, 'leaves.json')),
   settings:      new JsonKVStore(path.join(DATA_DIR, 'settings.json')),
 };

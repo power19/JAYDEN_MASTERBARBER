@@ -116,6 +116,15 @@ const TRANSLATIONS = {
     booked_header_group:'🎉 *Group Booking Confirmed! ({count} people)*',
     confirm_group:      '👥 Group',
 
+    // Photo gallery
+    menu_gallery:       '📸 Browse Styles & Gallery',
+    gallery_header:     '📸 *Browse Our Styles*\n\nChoose a category:',
+    gallery_no_tags:    '📸 No photos uploaded yet. Check back soon!',
+    gallery_no_photos:  '😔 No photos found for that style. Try another category!',
+    gallery_sending:    '📸 *{tag}* styles:',
+    gallery_more:       '_+{count} more photos available — visit us to see them all!_',
+    gallery_invalid:    'Please reply with a valid number, or *0* to go back.',
+
     // Blocked customer
     customer_blocked: '🚫 Your access to the booking bot has been temporarily restricted. Please contact us directly at *{phone}* to resolve this.',
 
@@ -232,6 +241,15 @@ const TRANSLATIONS = {
     group_follow_up:    'vervolg afspraak',
     booked_header_group:'🎉 *Groepsboeking Bevestigd! ({count} personen)*',
     confirm_group:      '👥 Groep',
+
+    // Photo gallery
+    menu_gallery:       '📸 Stijlen & Galerij Bekijken',
+    gallery_header:     '📸 *Onze Stijlen*\n\nKies een categorie:',
+    gallery_no_tags:    '📸 Nog geen foto\'s beschikbaar. Kom binnenkort terug!',
+    gallery_no_photos:  '😔 Geen foto\'s gevonden voor die stijl. Probeer een andere categorie!',
+    gallery_sending:    '📸 *{tag}* stijlen:',
+    gallery_more:       '_+{count} meer foto\'s beschikbaar — bezoek ons om ze allemaal te zien!_',
+    gallery_invalid:    'Antwoord met een geldig getal, of *0* om terug te gaan.',
 
     // Blocked customer
     customer_blocked: '🚫 Uw toegang tot de boekingsbot is tijdelijk beperkt. Neem rechtstreeks contact met ons op via *{phone}*.',
@@ -350,6 +368,15 @@ const TRANSLATIONS = {
     booked_header_group:'🎉 *¡Reserva Grupal Confirmada! ({count} personas)*',
     confirm_group:      '👥 Grupo',
 
+    // Photo gallery
+    menu_gallery:       '📸 Ver Estilos y Galería',
+    gallery_header:     '📸 *Nuestros Estilos*\n\nElige una categoría:',
+    gallery_no_tags:    '📸 Aún no hay fotos disponibles. ¡Vuelve pronto!',
+    gallery_no_photos:  '😔 No se encontraron fotos para ese estilo. ¡Prueba otra categoría!',
+    gallery_sending:    '📸 Estilos de *{tag}*:',
+    gallery_more:       '_+{count} fotos más disponibles — ¡visítanos para verlas todas!_',
+    gallery_invalid:    'Por favor responde con un número válido, o *0* para volver.',
+
     // Blocked customer
     customer_blocked: '🚫 Tu acceso al bot de reservas ha sido temporalmente restringido. Contáctanos directamente en *{phone}*.',
 
@@ -466,6 +493,15 @@ const TRANSLATIONS = {
     group_follow_up:    'suite du rendez-vous',
     booked_header_group:'🎉 *Réservation Groupée Confirmée ! ({count} personnes)*',
     confirm_group:      '👥 Groupe',
+
+    // Photo gallery
+    menu_gallery:       '📸 Voir Styles & Galerie',
+    gallery_header:     '📸 *Nos Styles*\n\nChoisissez une catégorie :',
+    gallery_no_tags:    '📸 Aucune photo disponible pour l\'instant. Revenez bientôt !',
+    gallery_no_photos:  '😔 Aucune photo trouvée pour ce style. Essayez une autre catégorie !',
+    gallery_sending:    '📸 Styles *{tag}* :',
+    gallery_more:       '_+{count} photos disponibles — venez nous rendre visite pour les voir toutes !_',
+    gallery_invalid:    'Veuillez répondre avec un numéro valide, ou *0* pour revenir.',
 
     // Blocked customer
     customer_blocked: '🚫 Votre accès au bot de réservation a été temporairement restreint. Veuillez nous contacter directement au *{phone}*.',

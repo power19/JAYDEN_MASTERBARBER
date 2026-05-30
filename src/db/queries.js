@@ -634,6 +634,32 @@ function getAvailableDates(employees, daysAhead, limit = 20) {
   return dates;
 }
 
+// ── Photo Gallery ─────────────────────────────────────────────────────────────
+
+const getPhotos      = (tag) => tag
+  ? db.photos.find(p => Array.isArray(p.tags) && p.tags.map(t => t.toLowerCase()).includes(tag.toLowerCase()))
+  : db.photos.find();
+
+const getPhotoTags   = () => {
+  const tagSet = new Set();
+  db.photos.find().forEach(p => (p.tags || []).forEach(t => tagSet.add(t.toLowerCase())));
+  return [...tagSet].sort();
+};
+
+const addPhoto       = (data) => db.photos.insert({
+  filename:      data.filename,
+  original_name: data.originalName || data.filename,
+  tags:          (data.tags || []).map(t => t.toLowerCase().trim()).filter(Boolean),
+  caption:       data.caption || '',
+});
+
+const updatePhoto    = (id, data) => db.photos.updateById(id, {
+  tags:    (data.tags || []).map(t => t.toLowerCase().trim()).filter(Boolean),
+  caption: data.caption || '',
+});
+
+const deletePhoto    = (id) => db.photos.removeById(id);
+
 // ── Surinamese Public Holidays ────────────────────────────────────────────────
 
 /** Gregorian Easter algorithm — returns a Date object. */
@@ -765,6 +791,7 @@ module.exports = {
   getAppointmentByCode, getAppointmentById, cancelAppointment, rescheduleAppointment, isNewCustomer,
   getUnsurveyedAppointments, markSurveySent, saveRating, getNoShowCount,
   getAvailableSlotsForEmployee, getAvailableSlotsForAny, getAvailableSlotsForGroup, pickLeastBusyEmployee, getAvailableDates,
+  getPhotos, getPhotoTags, addPhoto, updatePhoto, deletePhoto,
   getBlocks, addBlock, deleteBlock,
   getSurinameseHolidays, syncSurinameseHolidays,
   getLeaves, getLeave, addLeave, deleteLeave, isEmployeeOnLeave,

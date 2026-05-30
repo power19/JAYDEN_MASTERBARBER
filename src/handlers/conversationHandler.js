@@ -162,6 +162,8 @@ async function handleMessage(message) {
       return onConfirm(userId, text, session);
     case 'RATING_APPOINTMENT':
       return onRating(userId, text, session);
+    case 'BROWSING_GALLERY':
+      return onGallery(userId, text, session);
     case 'MANAGING_BOOKING':
       return onManageBooking(userId, text, session);
     case 'MANAGING_OPTIONS':
@@ -223,11 +225,17 @@ function onMainMenu(userId, text, session) {
     case '3': return buildHours(lang);
     case '4': return buildLocation(lang);
     case '5': return buildContact(lang);
-    case '6':
+    case '6': {
+      const tags = q.getPhotoTags();
+      if (tags.length === 0) return `${t(lang, 'gallery_no_tags')}\n\n${buildMainMenu(lang)}`;
+      sessions.updateSession(userId, { state: 'BROWSING_GALLERY', galleryTags: tags });
+      return buildGalleryMenu(lang, tags);
+    }
+    case '7':
       sessions.resetSession(userId);
       sessions.updateSession(userId, { state: 'SELECTING_LANGUAGE' });
       return buildLanguageMenu();
-    case '7':
+    case '8':
       sessions.updateSession(userId, { state: 'MANAGING_BOOKING' });
       return t(lang, 'manage_prompt');
     default: {
@@ -989,6 +997,71 @@ async function onConfirmReschedule(userId, text, session) {
 
 // ── Message builders ──────────────────────────────────────────────────────────
 
+// ── Gallery ───────────────────────────────────────────────────────────────────
+
+function buildGalleryMenu(lang, tags) {
+  const list = tags.map((tag, i) => `${num(i)} ${tag.charAt(0).toUpperCase() + tag.slice(1)}`).join('\n');
+  return `${t(lang, 'gallery_header')}\n\n${list}\n\n_${t(lang, 'reply_or_back')}_`;
+}
+
+async function onGallery(userId, text, session) {
+  const lang = session.language;
+  const tags = session.galleryTags || [];
+
+  if (isBack(text, lang)) {
+    sessions.updateSession(userId, { state: 'MAIN_MENU' });
+    return buildMainMenu(lang);
+  }
+
+  const localIdx = parseInt(text, 10) - 1;
+  if (isNaN(localIdx) || localIdx < 0 || localIdx >= tags.length) {
+    return `${t(lang, 'gallery_invalid')}\n\n${buildGalleryMenu(lang, tags)}`;
+  }
+
+  const selectedTag = tags[localIdx];
+  const photos      = q.getPhotos(selectedTag);
+
+  if (photos.length === 0) {
+    return `${t(lang, 'gallery_no_photos')}\n\n${buildGalleryMenu(lang, tags)}`;
+  }
+
+  sessions.updateSession(userId, { state: 'MAIN_MENU' });
+
+  // Send photos via WhatsApp (max 5, non-blocking)
+  const MAX = 5;
+  const toSend = photos.slice(0, MAX);
+  const extra  = photos.length - MAX;
+  const path   = require('path');
+  const fs     = require('fs');
+
+  try {
+    const { getClient }    = require('../whatsapp-client');
+    const { MessageMedia } = require('whatsapp-web.js');
+    const wClient = getClient();
+    if (wClient) {
+      // Send header message first
+      const header = t(lang, 'gallery_sending', { tag: selectedTag.charAt(0).toUpperCase() + selectedTag.slice(1) });
+      // Send photos one by one
+      for (const photo of toSend) {
+        const filepath = path.join(process.cwd(), 'data', 'uploads', photo.filename);
+        if (!fs.existsSync(filepath)) continue;
+        const ext   = photo.filename.split('.').pop().toLowerCase();
+        const mime  = ext === 'png' ? 'image/png' : ext === 'gif' ? 'image/gif' : 'image/jpeg';
+        const b64   = fs.readFileSync(filepath).toString('base64');
+        const media = new MessageMedia(mime, b64, photo.filename);
+        await wClient.sendMessage(userId, media, { caption: photo.caption || undefined });
+      }
+      if (extra > 0) {
+        await wClient.sendMessage(userId, t(lang, 'gallery_more', { count: extra }));
+      }
+    }
+  } catch (e) {
+    console.error('⚠️  Gallery send error:', e.message);
+  }
+
+  return buildMainMenu(lang);
+}
+
 /**
  * Build the main menu message.
  * @param {string}  lang         - Language code
@@ -1005,8 +1078,9 @@ function buildMainMenu(lang, customHeader = null) {
     `${num(2)} ${t(lang, 'menu_hours')}`,
     `${num(3)} ${t(lang, 'menu_location')}`,
     `${num(4)} ${t(lang, 'menu_contact')}`,
-    `${num(5)} 🌐 ${t(lang, 'menu_language')}`,
-    `${num(6)} 📋 ${t(lang, 'menu_manage')}`,
+    `${num(5)} ${t(lang, 'menu_gallery')}`,
+    `${num(6)} 🌐 ${t(lang, 'menu_language')}`,
+    `${num(7)} 📋 ${t(lang, 'menu_manage')}`,
     ``, t(lang, 'menu_reply'),
   ].join('\n');
 }

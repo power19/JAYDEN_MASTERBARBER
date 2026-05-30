@@ -81,6 +81,7 @@
       <button @click="nav('leave')"        :class="page==='leave'        ? 'active' : ''" class="sidebar-link w-full text-left">🏖️ Employee Leave</button>
       <button @click="nav('blocks')"      :class="page==='blocks'      ? 'active' : ''" class="sidebar-link w-full text-left">🚫 Closed Dates</button>
       <button @click="nav('services')"    :class="page==='services'    ? 'active' : ''" class="sidebar-link w-full text-left">✂️ Services</button>
+      <button @click="nav('gallery')"      :class="page==='gallery'      ? 'active' : ''" class="sidebar-link w-full text-left">📸 Gallery</button>
       <button @click="nav('customers')"   :class="page==='customers'   ? 'active' : ''" class="sidebar-link w-full text-left">👤 Customers</button>
       <button @click="nav('messages')"    :class="page==='messages'    ? 'active' : ''" class="sidebar-link w-full text-left">✉️ Bot Messages</button>
       <button @click="nav('settings')"    :class="page==='settings'    ? 'active' : ''" class="sidebar-link w-full text-left">⚙️ Settings</button>
@@ -1130,6 +1131,89 @@
       </div>
     </div>
 
+    <!-- ── GALLERY ───────────────────────────────────────────────── -->
+    <div x-show="page === 'gallery'" class="p-8">
+      <div class="flex justify-between items-center mb-6">
+        <h2 class="text-2xl font-bold text-slate-800">📸 Gallery</h2>
+        <!-- Upload button -->
+        <label class="btn-primary cursor-pointer">
+          <span x-text="photoUploading ? 'Uploading…' : '+ Upload Photos'"></span>
+          <input type="file" accept="image/*" multiple class="hidden"
+            @change="uploadPhotos(Array.from($event.target.files)); $event.target.value=''">
+        </label>
+      </div>
+
+      <!-- Tag filter -->
+      <div class="flex gap-2 flex-wrap mb-6" x-show="allPhotoTags().length > 0">
+        <button @click="photoTagFilter=''"
+          :class="photoTagFilter==='' ? 'btn-primary' : 'btn-secondary'"
+          class="text-xs py-1.5 px-3">All</button>
+        <template x-for="tag in allPhotoTags()" :key="tag">
+          <button @click="photoTagFilter = photoTagFilter===tag ? '' : tag"
+            :class="photoTagFilter===tag ? 'btn-primary' : 'btn-secondary'"
+            class="text-xs py-1.5 px-3 capitalize" x-text="tag"></button>
+        </template>
+      </div>
+
+      <!-- Empty state -->
+      <div x-show="photos.length === 0" class="card text-center text-slate-400 py-16">
+        <div class="text-5xl mb-3">📸</div>
+        <p class="font-medium">No photos yet</p>
+        <p class="text-sm mt-1">Upload haircut photos and tag them — customers can browse styles via WhatsApp</p>
+      </div>
+
+      <!-- Photo grid -->
+      <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+        <template x-for="p in filteredPhotos()" :key="p.id">
+          <div class="bg-white rounded-2xl overflow-hidden shadow-sm border border-slate-100 group relative">
+            <img :src="'/uploads/' + p.filename" class="w-full aspect-square object-cover">
+            <!-- Tag chips -->
+            <div class="p-2">
+              <div class="flex flex-wrap gap-1 mb-1.5">
+                <template x-for="tag in (p.tags || [])" :key="tag">
+                  <span class="text-xs bg-amber-100 text-amber-700 rounded-full px-2 py-0.5 font-medium capitalize" x-text="tag"></span>
+                </template>
+                <span x-show="!p.tags || p.tags.length===0" class="text-xs text-slate-300 italic">no tags</span>
+              </div>
+              <p x-show="p.caption" class="text-xs text-slate-500 truncate" x-text="p.caption"></p>
+            </div>
+            <!-- Hover actions -->
+            <div class="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition flex items-center justify-center gap-2">
+              <button @click="editingPhoto = { id: p.id, tagsRaw: (p.tags||[]).join(', '), caption: p.caption||'' }"
+                class="bg-white text-slate-800 rounded-xl px-3 py-1.5 text-xs font-semibold">✏️ Edit</button>
+              <button @click="deletePhoto(p.id)"
+                class="bg-red-500 text-white rounded-xl px-3 py-1.5 text-xs font-semibold">🗑️</button>
+            </div>
+          </div>
+        </template>
+      </div>
+
+      <!-- Edit photo modal -->
+      <template x-if="editingPhoto">
+        <div class="fixed inset-0 z-50 flex items-center justify-center p-4" style="background:rgba(0,0,0,0.5)"
+             @click.self="editingPhoto=null">
+          <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
+            <h3 class="font-bold text-slate-800 mb-4">✏️ Edit Photo</h3>
+            <div class="space-y-4">
+              <div>
+                <label class="label">Tags <span class="text-slate-400 font-normal">(comma separated)</span></label>
+                <input x-model="editingPhoto.tagsRaw" class="input" placeholder="fade, haircut, beard">
+                <p class="text-xs text-slate-400 mt-1">These are what customers search for in WhatsApp (e.g. "fade")</p>
+              </div>
+              <div>
+                <label class="label">Caption <span class="text-slate-400 font-normal">(optional)</span></label>
+                <input x-model="editingPhoto.caption" class="input" placeholder="Clean fade with skin taper">
+              </div>
+            </div>
+            <div class="flex gap-3 mt-5">
+              <button @click="savePhotoEdit()" class="btn-primary flex-1">Save</button>
+              <button @click="editingPhoto=null" class="btn-secondary flex-1">Cancel</button>
+            </div>
+          </div>
+        </div>
+      </template>
+    </div>
+
     <!-- ── CUSTOMERS ─────────────────────────────────────────────── -->
     <div x-show="page === 'customers'" class="p-8">
       <div class="flex justify-between items-center mb-6">
@@ -1768,6 +1852,12 @@ function app() {
     leaveForm:      { employee_id: '', start_date: '', end_date: '', reason: '' },
     leaveSaving:    false,
 
+    // Gallery
+    photos:          [],
+    photoTagFilter:  '',
+    photoUploading:  false,
+    editingPhoto:    null,   // { id, tags, caption }
+
     // Customer profiles
     customers: [],
     customerFilter: 'all',  // 'all' | 'noshows' | 'blocked'
@@ -1933,6 +2023,10 @@ function app() {
       if (p === 'services')     this.services = await this.api('GET', '/api/services');
       if (p === 'blocks') {
         this.holidayPreview = await this.api('GET', `/api/holidays/${this.holidayYear}`);
+      }
+      if (p === 'gallery') {
+        this.photos         = await this.api('GET', '/api/photos');
+        this.photoTagFilter = '';
       }
       if (p === 'leave') {
         this.leaveMonth = new Date().toISOString().slice(0, 7); // always open on current month
@@ -2167,6 +2261,43 @@ function app() {
         this.showToast(`🇸🇷 ${result.added} holiday(s) added for ${this.holidayYear}`);
         await this.loadBlocks();
       }
+    },
+
+    // ── Gallery ───────────────────────────────────────────────────────────────
+    filteredPhotos() {
+      if (!this.photoTagFilter) return this.photos;
+      return this.photos.filter(p => (p.tags || []).includes(this.photoTagFilter));
+    },
+    allPhotoTags() {
+      const s = new Set();
+      this.photos.forEach(p => (p.tags || []).forEach(t => s.add(t)));
+      return [...s].sort();
+    },
+    async uploadPhotos(files) {
+      this.photoUploading = true;
+      for (const file of files) {
+        const base64 = await new Promise(res => {
+          const reader = new FileReader();
+          reader.onload = e => res(e.target.result);
+          reader.readAsDataURL(file);
+        });
+        await this.api('POST', '/api/photos', { base64, filename: file.name, tags: [], caption: '' });
+      }
+      this.photos         = await this.api('GET', '/api/photos');
+      this.photoUploading = false;
+      this.showToast(`✅ ${files.length} photo(s) uploaded`);
+    },
+    async savePhotoEdit() {
+      const tags = this.editingPhoto.tagsRaw.split(',').map(t => t.trim()).filter(Boolean);
+      await this.api('PUT', `/api/photos/${this.editingPhoto.id}`, { tags, caption: this.editingPhoto.caption });
+      this.photos       = await this.api('GET', '/api/photos');
+      this.editingPhoto = null;
+      this.showToast('✅ Photo updated');
+    },
+    async deletePhoto(id) {
+      await this.api('DELETE', `/api/photos/${id}`);
+      this.photos = await this.api('GET', '/api/photos');
+      this.showToast('🗑️ Photo deleted');
     },
 
     // ── Leave management ─────────────────────────────────────────────────────
