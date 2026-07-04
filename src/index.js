@@ -123,7 +123,12 @@ client.on('message', (msg) => {
       const reply = await handleMessage(msg);
       if (!reply) return;
 
-      const send = (text) => client.sendMessage(msg.from, text);
+      // Route every reply through noteSend() so the watchdog can spot a wedged
+      // Chrome (sends time out even though getState() still answers).
+      const send = async (content) => {
+        try { const r = await client.sendMessage(msg.from, content); noteSend(true); return r; }
+        catch (e) { noteSend(false, (e && e.message) || String(e)); throw e; }
+      };
 
       if (typeof reply === 'string') {
         await send(reply);
@@ -142,7 +147,7 @@ client.on('message', (msg) => {
               Buffer.from(reply.ics, 'utf8').toString('base64'),
               reply.filename || 'appointment.ics'
             );
-            await client.sendMessage(msg.from, media);
+            await send(media);
             console.log(`📆 ICS calendar file sent to ${msg.from}`);
           } catch (icsErr) {
             // WhatsApp may not support text/calendar — log but don't show error to customer.
@@ -197,6 +202,23 @@ function hardRecover(reason) {
   } catch (_) { /* best effort */ }
   // Let logs flush, then exit; pm2 brings us back with a fresh Chrome.
   setTimeout(() => process.exit(1), 500);
+}
+
+// Send-failure detector — the wedge we actually see in production: Chrome keeps
+// receiving messages but sendMessage() times out, while getState() still passes,
+// so the liveness probe below misses it. Count consecutive send failures that
+// carry a CDP-wedge signature and hard-recover; any successful send resets it.
+const WEDGE_RE = /Runtime\.callFunctionOn timed out|Protocol error|Target closed|Execution context was destroyed|Session closed/i;
+const SEND_FAIL_LIMIT = 3;
+let sendFailures = 0;
+function noteSend(ok, errMsg = '') {
+  if (ok) { sendFailures = 0; return; }
+  if (!WEDGE_RE.test(errMsg)) return;   // ignore unrelated send errors (bad recipient, media type, etc.)
+  sendFailures++;
+  console.warn(`🐕 Send timeout ${sendFailures}/${SEND_FAIL_LIMIT} (Chrome-wedge signature): ${errMsg}`);
+  if (sendFailures >= SEND_FAIL_LIMIT) {
+    hardRecover(`${sendFailures} consecutive send timeouts — Chrome wedged`);
+  }
 }
 
 // Active liveness probe: getState() round-trips through the Chrome page, so a
