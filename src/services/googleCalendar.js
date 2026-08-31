@@ -181,7 +181,7 @@ async function cancelEvent({ calendarId, eventId }) {
 /**
  * Update (patch) an existing Google Calendar event (used when rescheduling).
  */
-async function updateEvent({ calendarId, eventId, startTime, endTime, service, customerName, bookingCode, employeeName, employeeColor }) {
+async function updateEvent({ calendarId, eventId, startTime, endTime, service, customerName, bookingCode, employeeName, employeeColor, statusLabel }) {
   if (!calendarId || !eventId) return { success: false, error: 'Missing calendarId or eventId' };
   const timezone = process.env.TIMEZONE || 'America/Paramaribo';
   const currency = process.env.CURRENCY || 'SRD';
@@ -191,7 +191,7 @@ async function updateEvent({ calendarId, eventId, startTime, endTime, service, c
     const titleParts = [`💈 ${service.name}`, customerName];
     if (employeeName) titleParts.splice(1, 0, `(${employeeName})`);
     const patch = {
-      summary: dot + titleParts.join(' — '),
+      summary: (statusLabel ? statusLabel + ' ' : '') + dot + titleParts.join(' — '),
       description: [
         `📋 Service : ${service.name}`,
         employeeName ? `✂️  Barber  : ${employeeName}` : '',
@@ -200,7 +200,7 @@ async function updateEvent({ calendarId, eventId, startTime, endTime, service, c
         `💰 Price   : ${currency} ${service.price}`,
         `⏱️  Duration: ${service.duration} min`,
         '',
-        '🔄 Rescheduled via WhatsApp Bot',
+        statusLabel ? '🔄 Status updated via Kassa/Dashboard' : '🔄 Rescheduled via WhatsApp Bot',
       ].filter(Boolean).join('\n'),
       start: { dateTime: new Date(startTime).toISOString(), timeZone: timezone },
       end:   { dateTime: new Date(endTime).toISOString(),   timeZone: timezone },

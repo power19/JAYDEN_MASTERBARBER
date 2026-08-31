@@ -16,7 +16,7 @@ const sessions = require('../utils/sessionManager');
 // States where the bot is waiting for freeform input — don't interrupt with a survey
 const ACTIVE_STATES = new Set([
   'SELECTING_SERVICE', 'SELECTING_GROUP_SIZE', 'SELECTING_EMPLOYEE',
-  'SELECTING_DATE', 'SELECTING_TIME', 'ENTERING_NAME', 'CONFIRMING_BOOKING',
+  'SELECTING_DATE', 'SELECTING_TIME', 'ENTERING_NAME',
   'MANAGING_BOOKING', 'MANAGING_OPTIONS', 'CONFIRMING_CANCEL',
   'RESCHEDULING_DATE', 'RESCHEDULING_TIME', 'CONFIRMING_RESCHEDULE',
 ]);

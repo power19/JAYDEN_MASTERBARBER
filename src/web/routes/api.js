@@ -6,7 +6,7 @@ const express   = require('express');
 const router    = express.Router();
 const q                  = require('../../db/queries');
 const { state: waState, update: waUpdate } = require('../../whatsapp-state');
-const { GCAL_COLORS, cancelEvent, createLeaveEvent } = require('../../services/googleCalendar');
+const { GCAL_COLORS, cancelEvent, createLeaveEvent, updateEvent: calUpdate } = require('../../services/googleCalendar');
 const { getClient }      = require('../../whatsapp-client');
 const chatPause          = require('../../utils/chatPause');
 const { startBot }       = require('../../bot-runner');
@@ -16,6 +16,30 @@ const { startBot }       = require('../../bot-runner');
 function requireAuth(req, res, next) {
   if (req.session?.authenticated) return next();
   res.status(401).json({ error: 'Not authenticated' });
+}
+
+/**
+ * Best-effort: mark a completed/no-show appointment's Google Calendar event
+ * with a status label, so the event itself (not just the local record)
+ * reflects what happened — useful as a recovery fallback if local data is
+ * ever lost. Never throws; a Calendar hiccup must never block the caller.
+ */
+async function syncCalendarStatus(appt, statusLabel) {
+  if (!appt?.google_event_id) return; // never synced to Calendar — nothing to patch
+  try {
+    const calendarId = q.getSetting('google_calendar_id') ||
+      (process.env.GOOGLE_CALENDAR_ID !== 'primary' ? process.env.GOOGLE_CALENDAR_ID : null);
+    if (!calendarId) return;
+    const employee = appt.employee_id ? q.getEmployee(appt.employee_id) : null;
+    await calUpdate({
+      calendarId, eventId: appt.google_event_id,
+      startTime: new Date(appt.start_time), endTime: new Date(appt.end_time),
+      service: { name: appt.service_name, price: appt.service_price, duration: appt.service_duration },
+      customerName: appt.customer_name, bookingCode: appt.booking_code,
+      employeeName: employee?.name || appt.employee_name, employeeColor: employee?.color,
+      statusLabel,
+    });
+  } catch (e) { console.error('⚠️  Calendar status sync failed:', e.message); }
 }
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
@@ -67,9 +91,15 @@ router.post('/scan/auth', (req, res) => {
   }
 });
 
-/** Barber check-in — requires barber PIN session (NOT admin auth). */
+/** Barber check-in — requires barber PIN session (NOT admin auth), or the PIN
+ *  itself in the body for server-to-server calls (e.g. the Kassa marking a
+ *  booking complete when it's paid at the register — no shared session to use).
+ *  Unlike /scan/auth, this path has NO fallback default — if barber_scan_pin
+ *  isn't explicitly configured, the PIN-in-body path can never succeed. */
 router.post('/scan/checkin/:code', (req, res) => {
-  if (!req.session?.barberAuthenticated && !req.session?.authenticated) {
+  const configuredPin = q.getSetting('barber_scan_pin');
+  const pinOk = !!configuredPin && req.body?.pin && String(req.body.pin) === String(configuredPin);
+  if (!pinOk && !req.session?.barberAuthenticated && !req.session?.authenticated) {
     return res.status(401).json({ ok: false, message: 'Not authenticated — please enter your PIN' });
   }
   try {
@@ -94,6 +124,7 @@ router.post('/scan/checkin/:code', (req, res) => {
     }
 
     q.updateAppointment(appt.id, { status: 'completed' });
+    syncCalendarStatus(appt, '✅'); // best-effort, not awaited — never delays the check-in response
     const employee    = appt.employee_id ? q.getEmployee(appt.employee_id) : null;
     const scannedBy   = req.session.barberEmployeeName || 'Admin';
     console.log(`✅ Check-in by ${scannedBy}: ${appt.customer_name} — ${appt.booking_code}`);
@@ -180,6 +211,7 @@ router.post('/checkin/:code', requireAuth, (req, res) => {
     if (appt.status === 'completed') return res.json({ ok: false, already: true, message: 'Already checked in', customer_name: appt.customer_name, service_name: appt.service_name, service_emoji: appt.service_emoji || '✂️' });
 
     q.updateAppointment(appt.id, { status: 'completed' });
+    syncCalendarStatus(appt, '✅'); // best-effort, not awaited — never delays the check-in response
     const employee = appt.employee_id ? q.getEmployee(appt.employee_id) : null;
     console.log(`✅ Check-in: ${appt.customer_name} — ${appt.booking_code}`);
     res.json({
@@ -328,7 +360,7 @@ router.post('/appointments', async (req, res) => {
       const shopCalId   = q.getSetting('google_calendar_id') ||
         (process.env.GOOGLE_CALENDAR_ID !== 'primary' ? process.env.GOOGLE_CALENDAR_ID : null);
 
-      if (shopCalId) {
+      if (shopCalId && !result.duplicate) {
         const eventData = {
           service:       { name: req.body.service_name, emoji: req.body.service_emoji, duration: req.body.service_duration, price: req.body.service_price },
           startTime:     new Date(req.body.start_time),
@@ -396,6 +428,10 @@ router.put('/appointments/:id', async (req, res) => {
       }
     }
 
+    // Completed/no-show: label the calendar event rather than deleting it.
+    if (req.body.status === 'completed') syncCalendarStatus(appt, '✅');
+    if (req.body.status === 'no-show')   syncCalendarStatus(appt, '👻');
+
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -415,7 +451,7 @@ router.post('/appointments/:id/sync-calendar', async (req, res) => {
     if (!shopCalId)
       return res.status(400).json({ error: 'No calendar configured. Set a Calendar ID in Settings.' });
 
-    const { createAppointment: calCreate } = require('../../services/googleCalendar');
+    const { createAppointment: calCreate, cancelEvent } = require('../../services/googleCalendar');
     const eventData = {
       service:       { name: appt.service_name, emoji: appt.service_emoji, duration: appt.service_duration, price: appt.service_price },
       startTime:     new Date(appt.start_time),
@@ -425,6 +461,13 @@ router.post('/appointments/:id/sync-calendar', async (req, res) => {
       employeeName:  employee?.name,
       employeeColor: employee?.color,
     };
+
+    // If this appointment already has a live event, remove it first — otherwise
+    // re-syncing leaves the old event orphaned on the calendar as a ghost
+    // duplicate (same booking code, stale barber/time) alongside the new one.
+    if (appt.google_event_id) {
+      await cancelEvent({ calendarId: shopCalId, eventId: appt.google_event_id }).catch(() => {});
+    }
 
     // Shop calendar — barbers see it via their read-only share
     const shopResult = await calCreate({ ...eventData, calendarId: shopCalId });
@@ -440,7 +483,7 @@ router.post('/appointments/:id/sync-calendar', async (req, res) => {
 // Useful when switching calendars — wipes old event IDs and creates fresh events.
 router.post('/appointments/sync-all-calendar', async (req, res) => {
   try {
-    const { createAppointment: calCreate } = require('../../services/googleCalendar');
+    const { createAppointment: calCreate, cancelEvent } = require('../../services/googleCalendar');
     const shopCalId = q.getSetting('google_calendar_id') ||
       (process.env.GOOGLE_CALENDAR_ID !== 'primary' ? process.env.GOOGLE_CALENDAR_ID : null);
 
@@ -464,6 +507,11 @@ router.post('/appointments/sync-all-calendar', async (req, res) => {
           employeeName:  employee?.name,
           employeeColor: employee?.color,
         };
+        // Remove the previous event first — otherwise every re-sync leaves the
+        // old one behind as an orphaned ghost duplicate on the calendar.
+        if (appt.google_event_id) {
+          await cancelEvent({ calendarId: shopCalId, eventId: appt.google_event_id }).catch(() => {});
+        }
         const r = await calCreate({ ...eventData, calendarId: shopCalId });
         if (r.success) {
           q.updateAppointment(appt.id, { google_event_id: r.eventId, google_event_link: r.eventLink });

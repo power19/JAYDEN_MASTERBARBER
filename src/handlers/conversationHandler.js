@@ -3,7 +3,10 @@
  *
  * States:
  *   IDLE → SELECTING_LANGUAGE → MAIN_MENU → SELECTING_SERVICE → SELECTING_GROUP_SIZE
- *   → SELECTING_DATE → SELECTING_TIME → ENTERING_NAME → CONFIRMING_BOOKING → IDLE
+ *   → SELECTING_DATE → SELECTING_TIME → ENTERING_NAME → IDLE
+ *
+ *   Booking is finalized as soon as the name is known (typed, or already on
+ *   file for a returning customer) — no separate YES/NO confirmation step.
  *
  *   Group bookings (family/kids): group size asked after service selection.
  *   If groupSize > barbers → overflow people are auto-scheduled for the next slot right after.
@@ -23,7 +26,7 @@ const {
   cancelEvent:       calendarCancel,
   updateEvent:       calendarUpdate,
 } = require('../services/googleCalendar');
-const { t, buildLanguageMenu, matchLanguage } = require('../i18n/translations');
+const { t, ordinal, buildLanguageMenu, matchLanguage } = require('../i18n/translations');
 const { generateIcs }                       = require('../utils/icsGenerator');
 const PRIVACY_POLICY                        = require('../config/privacyPolicy');
 
@@ -31,6 +34,12 @@ const NUM       = ['1️⃣','2️⃣','3️⃣','4️⃣','5️⃣','6️⃣','
 const num       = i => NUM[i] || `*${i + 1}.*`;
 const PAGE_SIZE = 10; // max time slots shown per page
 const CUR = () => q.getSetting('currency') || 'SRD';
+
+// Thrown by bookOne() when createAppointment() refuses a write because another
+// customer's booking landed on the same employee/time first (see the overlap
+// guard in queries.js). Caught in finalizeBooking/onConfirmMulti to bounce the
+// customer back to time selection instead of silently double-booking.
+class SlotTakenError extends Error {}
 
 const isMenu      = tx => /^(menu|main|home|start|hi|hello|hey|hola|hallo|bonjour|bonsoir)$/i.test(tx.trim());
 const isCancel    = tx => /^(cancel|exit|quit|stop|annuleer|afsluiten|cancelar|salir|annuler|quitter)$/i.test(tx.trim());
@@ -136,7 +145,7 @@ async function handleMessage(message) {
   const MID_FLOW_STATES = new Set([
     'SELECTING_SERVICE', 'SELECTING_GROUP_SIZE', 'SELECTING_EMPLOYEE',
     'COLLECTING_PERSON_NAME', 'COLLECTING_PERSON_SERVICE',
-    'SELECTING_DATE', 'SELECTING_TIME', 'ENTERING_NAME', 'CONFIRMING_BOOKING',
+    'SELECTING_DATE', 'SELECTING_TIME', 'ENTERING_NAME',
     'MANAGING_SELECT', 'MANAGING_BOOKING', 'MANAGING_OPTIONS', 'CONFIRMING_CANCEL', 'CONFIRMING_CANCEL_SCOPE',
     'RESCHEDULING_DATE', 'RESCHEDULING_TIME', 'CONFIRMING_RESCHEDULE',
     'SURVEY_RATING', 'BROWSING_GALLERY',
@@ -200,8 +209,6 @@ async function handleMessage(message) {
       return onTime(userId, text, session);
     case 'ENTERING_NAME':
       return onName(userId, text, session);
-    case 'CONFIRMING_BOOKING':
-      return onConfirm(userId, text, session);
     case 'RATING_APPOINTMENT':
       return onRating(userId, text, session);
     case 'MANAGING_SELECT':
@@ -503,7 +510,7 @@ async function onGroupSize(userId, text, session) {
     persons: [],
     currentPersonIdx: 0,
   });
-  return t(lang, 'collect_person_name', { n: 1, total: groupSize });
+  return t(lang, 'collect_person_name', { ordinal: ordinal(lang, 1) });
 }
 
 function onCollectPersonName(userId, text, session) {
@@ -549,7 +556,7 @@ async function onCollectPersonService(userId, text, session) {
   if (isBack(text, lang)) {
     // Go back to name entry for this person
     sessions.updateSession(userId, { state: 'COLLECTING_PERSON_NAME' });
-    return t(lang, 'collect_person_name', { n: currentPersonIdx + 1, total: groupSize });
+    return t(lang, 'collect_person_name', { ordinal: ordinal(lang, currentPersonIdx + 1) });
   }
 
   const services = q.getActiveServices();
@@ -584,7 +591,7 @@ async function onCollectPersonService(userId, text, session) {
       currentPersonIdx: nextIdx,
       servicePage: 0,
     });
-    return t(lang, 'collect_person_name', { n: nextIdx + 1, total: groupSize });
+    return t(lang, 'collect_person_name', { ordinal: ordinal(lang, nextIdx + 1) });
   }
 
   // All persons collected — find available dates
@@ -716,7 +723,7 @@ async function onDate(userId, text, session) {
   return buildTimeMenu(lang, selectedDate, freeSlots, service, 0);
 }
 
-function onTime(userId, text, session) {
+async function onTime(userId, text, session) {
   const lang  = session.language;
   const page  = session.slotPage || 0;
   const slots = session.availableSlots;
@@ -754,42 +761,44 @@ function onTime(userId, text, session) {
 
   const selectedSlot = slots[actualIdx];
 
-  // Multi-person booking: skip name entry (names already collected), go straight to confirm
+  // Multi-person booking: skip name entry (names already collected) and the
+  // confirm step — book immediately, sending the summary alongside the
+  // booked confirmation instead of waiting for a YES/NO reply.
   if (session.persons?.length > 1) {
-    sessions.updateSession(userId, { state: 'CONFIRMING_BOOKING', selectedTime: selectedSlot, slotPage: 0 });
-    return buildConfirmationSummaryMulti(lang, session.persons, session.selectedDate, selectedSlot);
+    const summary = buildConfirmationSummaryMulti(lang, session.persons, session.selectedDate, selectedSlot);
+    const updated = sessions.updateSession(userId, { selectedTime: selectedSlot, slotPage: 0 });
+    const result  = await finalizeBooking(userId, updated);
+    return [summary, result];
   }
 
-  // Single person: skip name entry if customer profile already has a name
+  // Single person: skip name entry (and the confirm step) if customer profile already has a name
   const customerPhone  = userId.replace(/@\S+$/, '');
   const knownCustomer  = q.getCustomerByPhone(customerPhone);
   if (knownCustomer?.name) {
-    sessions.updateSession(userId, { state: 'CONFIRMING_BOOKING', selectedTime: selectedSlot, slotPage: 0, userName: knownCustomer.name });
-    return buildConfirmationSummary(lang, knownCustomer.name, session.selectedService, session.selectedDate, selectedSlot, session.groupSize || 1);
+    const summary = buildConfirmationSummary(lang, knownCustomer.name, session.selectedService, session.selectedDate, selectedSlot, session.groupSize || 1);
+    const updated = sessions.updateSession(userId, { selectedTime: selectedSlot, slotPage: 0, userName: knownCustomer.name });
+    const result  = await finalizeBooking(userId, updated);
+    return [summary, result];
   }
 
   sessions.updateSession(userId, { state: 'ENTERING_NAME', selectedTime: selectedSlot, slotPage: 0 });
   return t(lang, 'enter_name');
 }
 
-function onName(userId, text, session) {
+async function onName(userId, text, session) {
   const lang = session.language;
   if (text.length < 2) return t(lang, 'name_too_short');
   const name = text.trim();
-  sessions.updateSession(userId, { state: 'CONFIRMING_BOOKING', userName: name });
-  return buildConfirmationSummary(lang, name, session.selectedService, session.selectedDate, session.selectedTime, session.groupSize || 1);
+  const summary = buildConfirmationSummary(lang, name, session.selectedService, session.selectedDate, session.selectedTime, session.groupSize || 1);
+  const updated = sessions.updateSession(userId, { userName: name });
+  const result  = await finalizeBooking(userId, updated);
+  return [summary, result];
 }
 
-async function onConfirm(userId, text, session) {
+// Books the appointment(s) for the current session — called as soon as a name
+// is known (typed, or already on file), with no separate YES/NO step.
+async function finalizeBooking(userId, session) {
   const lang = session.language;
-
-  if (isNo(text, lang)) {
-    sessions.resetSession(userId);
-    return t(lang, 'confirm_cancel');
-  }
-  if (!isYes(text, lang)) {
-    return t(lang, 'confirm_invalid');
-  }
 
   // ── Multi-person booking path ─────────────────────────────────────────────
   if (session.persons?.length > 1) {
@@ -812,9 +821,12 @@ async function onConfirm(userId, text, session) {
   const groupId     = totalToBook > 1 ? newGroupId() : '';
 
   // ── Helper: create one appointment + calendar event ───────────────────────
-  async function bookOne(slot, barber) {
-    const dbResult = q.createAppointment({
-      employee_id:      barber?.id || null,
+  // candidatePool: other barber IDs who were also free for this slot, so a
+  // clash (someone else just booked `barber`) can retry with an alternate
+  // before giving up on the whole slot.
+  async function bookOne(slot, barber, candidatePool) {
+    const apptData = empId => ({
+      employee_id:      empId || null,
       customer_name:    userName,
       customer_phone:   customerPhone,
       booking_group:    groupId,
@@ -826,7 +838,20 @@ async function onConfirm(userId, text, session) {
       start_time:       slot.start,
       end_time:         slot.end,
     });
-    if (shopCalId) {
+
+    let dbResult = q.createAppointment(apptData(barber?.id));
+
+    if (dbResult.clash) {
+      const alt = (candidatePool || []).filter(id => String(id) !== String(barber?.id));
+      if (alt.length) {
+        const altId = q.pickLeastBusyEmployee(alt, dateStr);
+        barber   = q.getEmployee(altId);
+        dbResult = q.createAppointment(apptData(barber?.id));
+      }
+    }
+    if (dbResult.clash) throw new SlotTakenError();
+
+    if (shopCalId && !dbResult.duplicate) {
       try {
         const r = await calendarCreate({
           calendarId:    shopCalId,
@@ -848,34 +873,54 @@ async function onConfirm(userId, text, session) {
         console.error('❌ Calendar sync exception (booking still saved):', err.message);
       }
     }
-    return { code: dbResult.booking_code, barber, slot };
+    return { id: dbResult.lastInsertRowid, code: dbResult.booking_code, barber, slot };
   }
 
   // ── Pick barbers & book main group ────────────────────────────────────────
   const mainEmpPool = [...(selectedTime.availableEmployees || [])];
   const usedMain    = new Set();
   const mainBookings = [];
-
-  for (let i = 0; i < mainCount; i++) {
-    const pool  = mainEmpPool.filter(id => !usedMain.has(String(id)));
-    const empId = q.pickLeastBusyEmployee(pool.length ? pool : mainEmpPool, dateStr);
-    usedMain.add(String(empId));
-    mainBookings.push(await bookOne(selectedTime, q.getEmployee(empId)));
-  }
-
-  // ── Pick barbers & book overflow group ────────────────────────────────────
-  // Overflow barbers are NOT excluded from the main pool — they finished the
-  // main appointment and are free again by the overflow start time.
   const overflowBookings = [];
-  if (overflowCount > 0 && overflowSlot) {
-    const ovPool  = [...(overflowSlot.availableEmployees || mainEmpPool)];
-    const usedOv  = new Set();
-    for (let i = 0; i < overflowCount; i++) {
-      const pool  = ovPool.filter(id => !usedOv.has(String(id)));
-      const empId = q.pickLeastBusyEmployee(pool.length ? pool : ovPool, dateStr);
-      usedOv.add(String(empId));
-      overflowBookings.push(await bookOne(overflowSlot, q.getEmployee(empId)));
+
+  try {
+    for (let i = 0; i < mainCount; i++) {
+      const pool  = mainEmpPool.filter(id => !usedMain.has(String(id)));
+      const candidatePool = pool.length ? pool : mainEmpPool;
+      const empId = q.pickLeastBusyEmployee(candidatePool, dateStr);
+      usedMain.add(String(empId));
+      mainBookings.push(await bookOne(selectedTime, q.getEmployee(empId), candidatePool));
     }
+
+    // ── Pick barbers & book overflow group ──────────────────────────────────
+    // Overflow barbers are NOT excluded from the main pool — they finished the
+    // main appointment and are free again by the overflow start time.
+    if (overflowCount > 0 && overflowSlot) {
+      const ovPool  = [...(overflowSlot.availableEmployees || mainEmpPool)];
+      const usedOv  = new Set();
+      for (let i = 0; i < overflowCount; i++) {
+        const pool  = ovPool.filter(id => !usedOv.has(String(id)));
+        const candidatePool = pool.length ? pool : ovPool;
+        const empId = q.pickLeastBusyEmployee(candidatePool, dateStr);
+        usedOv.add(String(empId));
+        overflowBookings.push(await bookOne(overflowSlot, q.getEmployee(empId), candidatePool));
+      }
+    }
+  } catch (err) {
+    if (!(err instanceof SlotTakenError)) throw err;
+    // Another customer grabbed this slot mid-flow. Roll back anything this
+    // call already wrote so we don't leave a half-booked, uncommunicated
+    // group, then send the customer back to a freshly-fetched time menu.
+    for (const b of [...mainBookings, ...overflowBookings]) {
+      if (b.id) q.cancelAppointment(b.id);
+    }
+    const employees = session.employees || q.getActiveEmployees();
+    const freeSlots  = session.isAnyEmployee
+      ? await q.getAvailableSlotsForAny(employees, selectedDate.date, selectedService.duration)
+      : await q.getAvailableSlotsForEmployee(session.selectedEmployee, selectedDate.date, selectedService.duration);
+    sessions.updateSession(userId, { state: 'SELECTING_TIME', selectedTime: null, availableSlots: freeSlots, slotPage: 0 });
+    return freeSlots.length
+      ? `${t(lang, 'slot_taken_retry')}\n\n${buildTimeMenu(lang, selectedDate, freeSlots, selectedService, 0)}`
+      : `${t(lang, 'slot_taken_retry')}\n\n${t(lang, 'no_slots_date', { date: selectedDate.fullDisplay })}`;
   }
 
   sessions.resetSession(userId);
@@ -1026,47 +1071,62 @@ async function onConfirmMulti(userId, session) {
 
   const bookings = [];
 
-  for (const assignment of selectedTime.assignments) {
-    const person  = persons[assignment.personIdx];
-    const service = person.service;
-    const barber  = allEmployees.find(e => e.id === assignment.employeeId) || null;
-    const slot    = { start: assignment.start, end: assignment.end, display: assignment.display };
+  try {
+    for (const assignment of selectedTime.assignments) {
+      const person  = persons[assignment.personIdx];
+      const service = person.service;
+      const barber  = allEmployees.find(e => e.id === assignment.employeeId) || null;
+      const slot    = { start: assignment.start, end: assignment.end, display: assignment.display };
 
-    const dbResult = q.createAppointment({
-      employee_id:      barber?.id || null,
-      customer_name:    person.name,
-      customer_phone:   customerPhone,
-      booking_group:    groupId,
-      service_id:       service.id,
-      service_name:     service.name,
-      service_emoji:    service.emoji,
-      service_duration: service.duration,
-      service_price:    service.price,
-      start_time:       slot.start,
-      end_time:         slot.end,
-    });
+      const dbResult = q.createAppointment({
+        employee_id:      barber?.id || null,
+        customer_name:    person.name,
+        customer_phone:   customerPhone,
+        booking_group:    groupId,
+        service_id:       service.id,
+        service_name:     service.name,
+        service_emoji:    service.emoji,
+        service_duration: service.duration,
+        service_price:    service.price,
+        start_time:       slot.start,
+        end_time:         slot.end,
+      });
+      // Each person here has a specific barber fixed by the slot-finding
+      // algorithm (parallel/sequential/batch) — unlike the single-service
+      // flow there's no interchangeable pool to retry with, so a clash just
+      // aborts this whole multi-person booking for a clean re-pick.
+      if (dbResult.clash) throw new SlotTakenError();
 
-    if (shopCalId) {
-      try {
-        const r = await calendarCreate({
-          calendarId:    shopCalId,
-          service,
-          startTime:     new Date(slot.start),
-          endTime:       new Date(slot.end),
-          customerName:  person.name,
-          bookingCode:   dbResult.booking_code,
-          employeeName:  barber?.name,
-          employeeColor: barber?.color,
-        });
-        if (r.success) {
-          q.updateAppointment(dbResult.lastInsertRowid, { google_event_id: r.eventId, google_event_link: r.eventLink });
+      if (shopCalId && !dbResult.duplicate) {
+        try {
+          const r = await calendarCreate({
+            calendarId:    shopCalId,
+            service,
+            startTime:     new Date(slot.start),
+            endTime:       new Date(slot.end),
+            customerName:  person.name,
+            bookingCode:   dbResult.booking_code,
+            employeeName:  barber?.name,
+            employeeColor: barber?.color,
+          });
+          if (r.success) {
+            q.updateAppointment(dbResult.lastInsertRowid, { google_event_id: r.eventId, google_event_link: r.eventLink });
+          }
+        } catch (err) {
+          console.error('❌ Calendar sync exception (booking still saved):', err.message);
         }
-      } catch (err) {
-        console.error('❌ Calendar sync exception (booking still saved):', err.message);
       }
-    }
 
-    bookings.push({ code: dbResult.booking_code, barber, slot, person, service });
+      bookings.push({ id: dbResult.lastInsertRowid, code: dbResult.booking_code, barber, slot, person, service });
+    }
+  } catch (err) {
+    if (!(err instanceof SlotTakenError)) throw err;
+    for (const b of bookings) if (b.id) q.cancelAppointment(b.id);
+    const freeSlots = await q.getAvailableSlotsForBatchGroup(persons, allEmployees, selectedDate.date);
+    sessions.updateSession(userId, { state: 'SELECTING_TIME', selectedTime: null, availableSlots: freeSlots, slotPage: 0 });
+    return freeSlots.length
+      ? `${t(lang, 'slot_taken_retry')}\n\n${buildTimeMenuMulti(lang, selectedDate, freeSlots, persons, 0)}`
+      : `${t(lang, 'slot_taken_retry')}\n\n${t(lang, 'no_slots_multi', { date: selectedDate.fullDisplay })}`;
   }
 
   sessions.resetSession(userId);
@@ -1601,8 +1661,17 @@ async function sendGallery(userId, lang) {
   return buildMainMenu(lang);
 }
 
+const TRAINING_MIME_TYPES = {
+  mov:  'video/quicktime',
+  mp4:  'video/mp4',
+  jpg:  'image/jpeg',
+  jpeg: 'image/jpeg',
+  png:  'image/png',
+  webp: 'image/webp',
+};
+
 /**
- * Send training video + caption to the customer.
+ * Send training video/picture + caption to the customer.
  * Returns a text fallback string if no video is configured.
  */
 async function onTraining(userId, lang) {
@@ -1632,7 +1701,7 @@ async function onTraining(userId, lang) {
         const isLast   = i === existing.length - 1;
         const filepath = path.join(process.cwd(), 'data', 'uploads', video.filename);
         const ext      = video.filename.split('.').pop().toLowerCase();
-        const mime     = ext === 'mov' ? 'video/quicktime' : 'video/mp4';
+        const mime     = TRAINING_MIME_TYPES[ext] || 'video/mp4';
         const b64      = fs.readFileSync(filepath).toString('base64');
         const media    = new MessageMedia(mime, b64, video.filename);
         const caption  = isLast
@@ -1727,7 +1796,7 @@ function buildMainMenu(lang, customHeader = null) {
       : (MENU_ITEM_LABEL[m.action] || (() => m.action))(lang);
     return `${num(i)} ${label}`;
   });
-  return [header, '', ...lines, '', t(lang, 'menu_reply')].join('\n');
+  return [header, '', ...lines].join('\n');
 }
 
 // Read-only price list for the "Service Prices" menu option. Shows every active
@@ -1814,9 +1883,7 @@ function buildTimeMenuMulti(lang, date, slots, persons, page = 0) {
  */
 function buildConfirmationSummaryMulti(lang, persons, date, slot) {
   const allEmployees = q.getActiveEmployees();
-  const lines = [t(lang, 'confirm_prompt'), ``];
-  lines.push(`📅 *${date.fullDisplay}*`);
-  lines.push(``);
+  const lines = [`📅 *${date.fullDisplay}*`, ``];
 
   const totalPrice = persons.reduce((sum, p) => sum + (+p.service?.price || 0), 0).toFixed(0);
 
@@ -1889,7 +1956,7 @@ function buildConfirmationSummary(lang, name, service, date, time, groupSize = 1
   const totalCount    = mainCount + overflowCount;
   const totalPrice    = (+service.price * totalCount).toFixed(0);
 
-  const lines = [t(lang, 'confirm_prompt'), ``];
+  const lines = [];
   lines.push(`${t(lang, 'confirm_name')}: *${name}*`);
 
   if (totalCount > 1) {

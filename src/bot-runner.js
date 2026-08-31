@@ -13,7 +13,7 @@ const { createBot }               = require('./bot');
 const { handleMessage }           = require('./handlers/conversationHandler');
 const { enqueue }                 = require('./utils/chatQueue');
 const { update: waUpdate, state: waState } = require('./whatsapp-state');
-const { setClient, getClient }    = require('./whatsapp-client');
+const { setClient, getClient, sendReply } = require('./whatsapp-client');
 const { startScheduler }          = require('./reminder-scheduler');
 const q                           = require('./db/queries');
 
@@ -86,35 +86,7 @@ async function startBot() {
     enqueue(msg.from, async () => {
     try {
       const reply = await handleMessage(msg);
-      if (!reply) return;
-
-      if (typeof reply === 'string') {
-        // Plain text reply
-        await msg.reply(reply);
-      } else {
-        // Rich reply: { text, ics, filename }
-        if (reply.text) await msg.reply(reply.text);
-
-        // ICS calendar attachment — send separately so a failure here
-        // never replaces the booking confirmation the user already received.
-        // Gated by the ics_enabled setting (absent/unset = on).
-        if (reply.ics && q.getSetting('ics_enabled') !== '0') {
-          try {
-            const { MessageMedia } = require('whatsapp-web.js');
-            const media = new MessageMedia(
-              'text/calendar',
-              Buffer.from(reply.ics, 'utf8').toString('base64'),
-              reply.filename || 'appointment.ics'
-            );
-            await client.sendMessage(msg.from, media);
-            console.log(`📆 ICS calendar file sent to ${msg.from}`);
-          } catch (icsErr) {
-            // WhatsApp may not support text/calendar — log but don't show error to customer.
-            // Their appointment is confirmed; they just won't get the .ics attachment.
-            console.error('⚠️  ICS attachment failed (booking still confirmed):', icsErr.message);
-          }
-        }
-      }
+      await sendReply(client, msg.from, reply);
     } catch (err) {
       console.error('❌ Error handling message:', err);
       await msg.reply(`😔 Something went wrong. Please contact us at ${q.getSetting('shop_phone') || 'the shop'}.`);

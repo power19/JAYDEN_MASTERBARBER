@@ -59,21 +59,29 @@
 </div>
 
 <!-- ── Main App ───────────────────────────────────────────────────────────── -->
-<div x-show="authenticated" class="flex h-screen overflow-hidden">
+<div x-show="authenticated" x-data="{ sidebarOpen: false }" class="flex h-screen overflow-hidden">
 
-  <!-- Sidebar -->
-  <aside class="w-64 bg-slate-900 flex flex-col flex-shrink-0 overflow-y-auto">
+  <!-- Backdrop (mobile/tablet only, shown while sidebar drawer is open) -->
+  <div x-show="sidebarOpen" x-cloak x-transition.opacity @click="sidebarOpen = false"
+       class="fixed inset-0 bg-black/50 z-30 lg:hidden"></div>
+
+  <!-- Sidebar: off-canvas drawer below lg, static column at lg+ -->
+  <aside class="fixed inset-y-0 left-0 z-40 w-64 bg-slate-900 flex flex-col flex-shrink-0 overflow-y-auto transform transition-transform duration-200 ease-in-out lg:static lg:translate-x-0"
+         :class="sidebarOpen ? 'translate-x-0' : '-translate-x-full'">
     <div class="p-5 border-b border-white/10">
       <div class="flex items-center gap-3">
         <span class="text-3xl">💈</span>
-        <div>
+        <div class="flex-1 min-w-0">
           <div class="text-white font-bold text-sm leading-tight" x-text="shopName || 'Barbershop'"></div>
           <div class="text-slate-400 text-xs">Admin Dashboard</div>
         </div>
+        <button @click="sidebarOpen = false" class="lg:hidden text-white/60 hover:text-white p-1">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
       </div>
     </div>
 
-    <nav class="flex-1 p-3 space-y-1">
+    <nav class="flex-1 p-3 space-y-1" @click="sidebarOpen = false">
       <button @click="nav('dashboard')"   :class="page==='dashboard'   ? 'active' : ''" class="sidebar-link w-full text-left">📊 Dashboard</button>
       <button @click="nav('appointments')" :class="page==='appointments' ? 'active' : ''" class="sidebar-link w-full text-left">📅 Appointments</button>
       <button @click="nav('employees')"   :class="page==='employees'   ? 'active' : ''" class="sidebar-link w-full text-left">👥 Employees</button>
@@ -111,10 +119,18 @@
   </aside>
 
   <!-- Main content -->
-  <main class="flex-1 overflow-y-auto">
+  <main class="flex-1 overflow-y-auto min-w-0">
+
+    <!-- Mobile/tablet top bar (hidden at lg+, where the sidebar is always visible) -->
+    <div class="lg:hidden sticky top-0 z-20 bg-slate-900 text-white flex items-center gap-3 px-4 py-3">
+      <button @click="sidebarOpen = true" class="p-1 -ml-1">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
+      </button>
+      <span class="font-bold text-sm" x-text="shopName || 'Barbershop'"></span>
+    </div>
 
     <!-- ── DASHBOARD ─────────────────────────────────────────────── -->
-    <div x-show="page === 'dashboard'" class="p-8">
+    <div x-show="page === 'dashboard'" class="p-4 lg:p-8">
       <h2 class="text-2xl font-bold text-slate-800 mb-6">Dashboard</h2>
 
       <!-- Stats -->
@@ -213,11 +229,13 @@
         <div x-show="todayAppointments.length === 0" class="text-slate-400 text-center py-8">No appointments today</div>
         <div class="space-y-3">
           <template x-for="a in todayAppointments" :key="a.id">
-            <div class="flex items-center gap-4 p-3 rounded-xl hover:bg-slate-50 border border-slate-100">
-              <div class="text-sm font-mono font-bold text-slate-600 w-20 flex-shrink-0" x-text="fmtTime(a.start_time)"></div>
-              <div class="w-3 h-3 rounded-full flex-shrink-0" :style="`background:${a.employee_color||'#94a3b8'}`"></div>
-              <div class="flex-1 min-w-0">
-                <div class="font-semibold text-slate-800 text-sm flex items-center gap-2">
+            <div class="flex flex-wrap items-center gap-3 sm:gap-4 p-3 rounded-xl hover:bg-slate-50 border border-slate-100">
+              <div class="flex items-center gap-3 flex-shrink-0">
+                <div class="text-sm font-mono font-bold text-slate-600 w-16 sm:w-20 flex-shrink-0" x-text="fmtTime(a.start_time)"></div>
+                <div class="w-3 h-3 rounded-full flex-shrink-0" :style="`background:${a.employee_color||'#94a3b8'}`"></div>
+              </div>
+              <div class="w-full sm:w-auto sm:flex-1 min-w-0 order-3 sm:order-none">
+                <div class="font-semibold text-slate-800 text-sm flex items-center gap-2 flex-wrap">
                   <span x-text="a.customer_name"></span>
                   <span class="text-xs font-mono text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded" x-text="'#' + (a.booking_code || '?')"></span>
                 </div>
@@ -227,7 +245,7 @@
               <div>
                 <span class="badge" :class="statusBadge(a.status)" x-text="a.status"></span>
               </div>
-              <div class="flex gap-2">
+              <div class="flex gap-2 ml-auto sm:ml-0">
                 <button @click="markStatus(a.id, 'completed')" title="Mark completed" class="text-emerald-500 hover:text-emerald-600 text-lg">✅</button>
                 <button @click="markStatus(a.id, 'no-show')"   title="Mark no-show"   class="text-orange-400 hover:text-orange-500 text-lg">👻</button>
               </div>
@@ -256,7 +274,7 @@
     </div>
 
     <!-- ── APPOINTMENTS ──────────────────────────────────────────── -->
-    <div x-show="page === 'appointments'" class="p-8">
+    <div x-show="page === 'appointments'" class="p-4 lg:p-8">
       <div class="flex justify-between items-center mb-6">
         <h2 class="text-2xl font-bold text-slate-800">Appointments</h2>
         <div class="flex items-center gap-2">
@@ -640,7 +658,7 @@
     </template>
 
     <!-- ── EMPLOYEES ─────────────────────────────────────────────── -->
-    <div x-show="page === 'employees'" class="p-8">
+    <div x-show="page === 'employees'" class="p-4 lg:p-8">
       <div class="flex justify-between items-center mb-6">
         <h2 class="text-2xl font-bold text-slate-800">Employees</h2>
         <button @click="openEmployeeModal()" class="btn-primary">+ Add Barber</button>
@@ -791,7 +809,7 @@
     </template>
 
     <!-- ── WORK HOURS ─────────────────────────────────────────────── -->
-    <div x-show="page === 'hours'" class="p-8">
+    <div x-show="page === 'hours'" class="p-4 lg:p-8">
       <div class="mb-6">
         <h2 class="text-2xl font-bold text-slate-800">Work Hours</h2>
         <!-- Active label -->
@@ -833,22 +851,24 @@
 
         <div x-show="!hoursLoading" class="space-y-3">
           <template x-for="(h, idx) in weeklyHours" :key="h.day_of_week">
-            <div class="flex items-center gap-4 p-3 rounded-xl hover:bg-slate-50">
-              <div class="w-28 text-sm font-medium text-slate-700"
-                   x-text="['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][h.day_of_week]"></div>
-              <!-- Toggle -->
-              <button @click="h.is_open = h.is_open ? 0 : 1"
-                :class="h.is_open ? 'bg-amber-500' : 'bg-slate-300'"
-                class="relative inline-flex h-6 w-11 rounded-full transition-colors flex-shrink-0">
-                <span :class="h.is_open ? 'translate-x-6' : 'translate-x-1'"
-                  class="inline-block h-4 w-4 rounded-full bg-white shadow mt-1 transition-transform"></span>
-              </button>
-              <span class="text-xs text-slate-500 w-12" x-text="h.is_open ? 'Open' : 'Closed'"></span>
+            <div class="flex flex-wrap items-center gap-3 sm:gap-4 p-3 rounded-xl hover:bg-slate-50">
+              <div class="flex items-center gap-3">
+                <div class="w-24 sm:w-28 text-sm font-medium text-slate-700"
+                     x-text="['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][h.day_of_week]"></div>
+                <!-- Toggle -->
+                <button @click="h.is_open = h.is_open ? 0 : 1"
+                  :class="h.is_open ? 'bg-amber-500' : 'bg-slate-300'"
+                  class="relative inline-flex h-6 w-11 rounded-full transition-colors flex-shrink-0">
+                  <span :class="h.is_open ? 'translate-x-6' : 'translate-x-1'"
+                    class="inline-block h-4 w-4 rounded-full bg-white shadow mt-1 transition-transform"></span>
+                </button>
+                <span class="text-xs text-slate-500 w-12" x-text="h.is_open ? 'Open' : 'Closed'"></span>
+              </div>
               <template x-if="h.is_open">
                 <div class="flex items-center gap-2">
-                  <input type="time" x-model="h.open_time"  class="input w-32 text-sm">
+                  <input type="time" x-model="h.open_time"  class="input w-28 sm:w-32 text-sm">
                   <span class="text-slate-400">–</span>
-                  <input type="time" x-model="h.close_time" class="input w-32 text-sm">
+                  <input type="time" x-model="h.close_time" class="input w-28 sm:w-32 text-sm">
                 </div>
               </template>
             </div>
@@ -862,7 +882,7 @@
     </div>
 
     <!-- ── SERVICES ──────────────────────────────────────────────── -->
-    <div x-show="page === 'services'" class="p-8">
+    <div x-show="page === 'services'" class="p-4 lg:p-8">
       <div class="flex justify-between items-center mb-6">
         <h2 class="text-2xl font-bold text-slate-800">Services</h2>
         <button @click="openServiceModal()" class="btn-primary">+ Add Service</button>
@@ -871,10 +891,10 @@
         <div x-show="services.length === 0" class="text-center text-slate-400 py-8">No services yet</div>
         <div class="space-y-3">
           <template x-for="s in services" :key="s.id">
-            <div class="flex items-center gap-4 p-3 rounded-xl hover:bg-slate-50 border border-slate-100">
+            <div class="flex flex-wrap items-center gap-3 sm:gap-4 p-3 rounded-xl hover:bg-slate-50 border border-slate-100">
               <span class="text-2xl" x-text="s.emoji || '✂️'"></span>
-              <div class="flex-1">
-                <div class="flex items-center gap-2">
+              <div class="flex-1 min-w-[10rem]">
+                <div class="flex items-center gap-2 flex-wrap">
                   <span class="font-semibold text-slate-800" x-text="s.name"></span>
                   <span class="badge" :class="s.is_active ? 'badge-green' : 'badge-gray'"
                         x-text="s.is_active ? 'Active' : 'Hidden'"></span>
@@ -897,7 +917,7 @@
     </div>
 
     <!-- ── EMPLOYEE LEAVE ─────────────────────────────────────────── -->
-    <div x-show="page === 'leave'" class="p-8">
+    <div x-show="page === 'leave'" class="p-4 lg:p-8">
       <h2 class="text-2xl font-bold text-slate-800 mb-6">🏖️ Employee Leave</h2>
 
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -1010,7 +1030,7 @@
     </div>
 
     <!-- ── CLOSED DATES ───────────────────────────────────────────── -->
-    <div x-show="page === 'blocks'" class="p-8">
+    <div x-show="page === 'blocks'" class="p-4 lg:p-8">
       <h2 class="text-2xl font-bold text-slate-800 mb-6">🚫 Closed Dates & Time-Off</h2>
 
       <!-- Surinamese Public Holidays -->
@@ -1144,7 +1164,7 @@
     </div>
 
     <!-- ── GALLERY ───────────────────────────────────────────────── -->
-    <div x-show="page === 'gallery'" class="p-8">
+    <div x-show="page === 'gallery'" class="p-4 lg:p-8">
       <div class="flex justify-between items-center mb-6">
         <h2 class="text-2xl font-bold text-slate-800">📸 Gallery</h2>
         <!-- Upload button -->
@@ -1227,7 +1247,7 @@
     </div>
 
     <!-- ── MENU ORDER ───────────────────────────────────────────── -->
-    <div x-show="page === 'menu'" class="p-8">
+    <div x-show="page === 'menu'" class="p-4 lg:p-8">
       <div class="flex justify-between items-center mb-2">
         <h2 class="text-2xl font-bold text-slate-800">📋 Menu Order</h2>
         <button @click="saveMenuOrder()" class="btn-primary">💾 Save</button>
@@ -1302,7 +1322,7 @@
     </div>
 
     <!-- ── TRAINING ──────────────────────────────────────────────── -->
-    <div x-show="page === 'training'" class="p-8">
+    <div x-show="page === 'training'" class="p-4 lg:p-8">
       <div class="flex justify-between items-center mb-6">
         <h2 class="text-2xl font-bold text-slate-800">🎓 Training</h2>
         <div class="flex items-center gap-3">
@@ -1317,40 +1337,40 @@
         </div>
       </div>
 
-      <!-- Upload new video -->
+      <!-- Upload new video/picture -->
       <div class="card mb-6">
-        <h3 class="font-bold text-slate-700 mb-1">Add Training Video</h3>
-        <p class="text-xs text-slate-400 mb-4">Each video can have its own caption. Videos are sent in order when a customer selects Training.</p>
+        <h3 class="font-bold text-slate-700 mb-1">Add Training Video or Picture</h3>
+        <p class="text-xs text-slate-400 mb-4">Each item can have its own caption. Items are sent in order when a customer selects Training.</p>
         <div class="space-y-3">
           <div>
-            <label class="label">Video File <span class="font-normal text-slate-400">(MP4 or MOV)</span></label>
+            <label class="label">File <span class="font-normal text-slate-400">(MP4, MOV, JPG, PNG or WEBP)</span></label>
             <label class="btn-secondary cursor-pointer inline-flex items-center gap-2">
-              🎬 Choose Video
-              <input type="file" accept="video/*" class="hidden" @change="trainingUploadFile = $event.target.files[0]; trainingUploadName = $event.target.files[0]?.name || ''">
+              🎬 Choose File
+              <input type="file" accept="video/*,image/*" class="hidden" @change="trainingUploadFile = $event.target.files[0]; trainingUploadName = $event.target.files[0]?.name || ''">
             </label>
             <span class="text-xs text-slate-500 ml-2" x-text="trainingUploadName || 'No file chosen'"></span>
           </div>
           <div>
-            <label class="label">Caption <span class="font-normal text-slate-400">(shown under the video in WhatsApp)</span></label>
+            <label class="label">Caption <span class="font-normal text-slate-400">(shown under the item in WhatsApp)</span></label>
             <textarea x-model="trainingUploadCaption" class="input text-sm" rows="3" placeholder="e.g. 📋 Module 1 — Fade technique. Watch carefully and practice these steps…"></textarea>
           </div>
           <button @click="uploadTrainingVideo()" :disabled="!trainingUploadFile"
             class="btn-primary disabled:opacity-50 disabled:cursor-not-allowed">
-            ⬆️ Upload Video
+            ⬆️ Upload
           </button>
         </div>
       </div>
 
-      <!-- Video list -->
+      <!-- Item list -->
       <div class="space-y-4">
         <div x-show="trainingVideos.length === 0" class="card text-center text-slate-400 py-10">
           <p class="text-3xl mb-2">🎬</p>
-          <p class="text-sm">No training videos yet. Upload one above.</p>
+          <p class="text-sm">No training items yet. Upload one above.</p>
         </div>
         <template x-for="(v, idx) in trainingVideos" :key="v.id">
           <div class="card">
             <div class="flex items-start gap-4">
-              <div class="flex-shrink-0 w-10 h-10 rounded-xl flex items-center justify-center text-xl" style="background:#f1f5f9">🎬</div>
+              <div class="flex-shrink-0 w-10 h-10 rounded-xl flex items-center justify-center text-xl" style="background:#f1f5f9" x-text="/\.(jpe?g|png|webp)$/i.test(v.originalName) ? '🖼️' : '🎬'"></div>
               <div class="flex-1 min-w-0">
                 <p class="text-xs text-slate-400 font-mono truncate mb-2" x-text="(idx + 1) + '. ' + v.originalName"></p>
                 <textarea
@@ -1369,7 +1389,7 @@
     </div>
 
     <!-- ── CUSTOMERS ─────────────────────────────────────────────── -->
-    <div x-show="page === 'customers'" class="p-8">
+    <div x-show="page === 'customers'" class="p-4 lg:p-8">
       <div class="flex justify-between items-center mb-6">
         <h2 class="text-2xl font-bold text-slate-800">👤 Customers</h2>
         <div class="flex gap-2">
@@ -1543,7 +1563,7 @@
     </template>
 
     <!-- ── KEYWORDS ─────────────────────────────────────────────── -->
-    <div x-show="page === 'keywords'" class="p-8">
+    <div x-show="page === 'keywords'" class="p-4 lg:p-8">
       <div class="flex justify-between items-center mb-2">
         <h2 class="text-2xl font-bold text-slate-800">🔑 Keywords</h2>
       </div>
@@ -1597,7 +1617,7 @@
     </div>
 
     <!-- ── BOT MESSAGES ──────────────────────────────────────────── -->
-    <div x-show="page === 'messages'" class="p-8">
+    <div x-show="page === 'messages'" class="p-4 lg:p-8">
       <div class="flex justify-between items-center mb-6">
         <h2 class="text-2xl font-bold text-slate-800">Bot Messages</h2>
         <button @click="saveMessages()" class="btn-primary">💾 Save All</button>
@@ -1620,7 +1640,7 @@
     </div>
 
     <!-- ── SETTINGS ──────────────────────────────────────────────── -->
-    <div x-show="page === 'settings'" class="p-8">
+    <div x-show="page === 'settings'" class="p-4 lg:p-8">
       <div class="flex justify-between items-center mb-6">
         <h2 class="text-2xl font-bold text-slate-800">Settings</h2>
         <div class="flex items-center gap-3">
@@ -2646,7 +2666,7 @@ function app() {
           this.trainingUploadFile    = null;
           this.trainingUploadName    = '';
           this.trainingUploadCaption = '';
-          this.showToast('✅ Training video uploaded!');
+          this.showToast('✅ Training item uploaded!');
         } catch (err) {
           this.showToast('❌ Upload failed: ' + (err.message || 'Unknown error'));
         }

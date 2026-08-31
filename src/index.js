@@ -18,7 +18,8 @@ const { createServer }          = require('./web/server');
 const { startBackupScheduler }  = require('./utils/backup');
 const q                         = require('./db/queries');
 const { update: waUpdate }      = require('./whatsapp-state');
-const { setClient }             = require('./whatsapp-client');
+const { setClient, onWedgeDetected, sendReply } = require('./whatsapp-client');
+const { sendAdminAlert }        = require('./utils/adminAlert');
 
 const shopName = q.getSetting('shop_name') || "Jayden's Barbershop";
 
@@ -43,6 +44,17 @@ setClient(client);          // share reference so the API can reconnect
 waUpdate({ status: 'initializing' });
 
 client.on('qr', async (qr) => {
+  // Track when this QR *streak* started (first qr event after being in some
+  // other state) — separate from waUpdate's lastUpdated, which resets on
+  // every refresh and so can't tell "healthy but ignored" apart from "just
+  // started". A QR that keeps refreshing normally but nobody scans can
+  // otherwise sit forever with no alert — that happened in production: an
+  // hour-plus outage with a live, refreshing QR nobody was watching.
+  if (require('./whatsapp-state').state.status !== 'qr') {
+    qrFirstSeenAt = Date.now();
+    qrAlertSent = false;
+  }
+
   // Show in terminal as before
   console.log('📱 Scan this QR code with the barber\'s WhatsApp:\n');
   qrcodeTerminal.generate(qr, { small: true });
@@ -121,41 +133,10 @@ client.on('message', (msg) => {
   enqueue(msg.from, async () => {
     try {
       const reply = await handleMessage(msg);
-      if (!reply) return;
-
-      // Route every reply through noteSend() so the watchdog can spot a wedged
-      // Chrome (sends time out even though getState() still answers).
-      const send = async (content) => {
-        try { const r = await client.sendMessage(msg.from, content); noteSend(true); return r; }
-        catch (e) { noteSend(false, (e && e.message) || String(e)); throw e; }
-      };
-
-      if (typeof reply === 'string') {
-        await send(reply);
-      } else {
-        // Rich reply: { text, ics, filename }
-        if (reply.text) await send(reply.text);
-
-        // ICS calendar attachment — isolated try-catch so a send failure
-        // never replaces the booking confirmation the user already received.
-        // Gated by the ics_enabled setting (absent/unset = on).
-        if (reply.ics && q.getSetting('ics_enabled') !== '0') {
-          try {
-            const { MessageMedia } = require('whatsapp-web.js');
-            const media = new MessageMedia(
-              'text/calendar',
-              Buffer.from(reply.ics, 'utf8').toString('base64'),
-              reply.filename || 'appointment.ics'
-            );
-            await send(media);
-            console.log(`📆 ICS calendar file sent to ${msg.from}`);
-          } catch (icsErr) {
-            // WhatsApp may not support text/calendar — log but don't show error to customer.
-            // Their appointment is confirmed; they just won't get the .ics attachment.
-            console.error('⚠️  ICS attachment failed (booking still confirmed):', icsErr.message);
-          }
-        }
-      }
+      // client.sendMessage() is wrapped in whatsapp-client.js's setClient(), so
+      // every send here (and everywhere else that reuses this client) already
+      // reports into the shared wedge detector — no per-call-site plumbing needed.
+      await sendReply(client, msg.from, reply);
     } catch (err) {
       console.error('❌ Error handling message:', err);
       try { await client.sendMessage(msg.from, `😔 Something went wrong. Please contact us at ${q.getSetting('shop_phone') || 'the shop'}.`); } catch (_) {}
@@ -185,16 +166,33 @@ const WATCHDOG_INTERVAL_MS  = 60_000;   // check every 60 s
 const WATCHDOG_THRESHOLD_MS = 120_000;  // act if stuck > 2 min
 const PROBE_TIMEOUT_MS      = 15_000;   // getState() must answer within 15 s
 const PROBE_FAIL_LIMIT      = 2;        // recover after this many failed probes
+// whatsapp-web.js cycles a fresh QR (and bumps lastUpdated) roughly every 20s
+// while waiting to be scanned. If the page wedges mid-QR-display the loop can
+// die silently, leaving a frozen, unscannable code with nothing watching it —
+// that happened in production: status sat on 'qr' for 15+ minutes with zero
+// refreshes. 90s of staleness is well past any normal refresh gap.
+const QR_STUCK_THRESHOLD_MS = 90_000;
+// A QR that keeps refreshing normally but nobody scans doesn't trip the
+// staleness check above (each refresh resets it) and was never watched by
+// anything else — an hour-plus production outage sat on a live, cycling QR
+// with zero alerts. This fires once per QR streak regardless of refreshes.
+const QR_UNSCANNED_ALERT_MS = 5 * 60_000;
 
 const SESSION_DIR = path.join(process.cwd(), '.wwebjs_auth', 'session');
-let recovering    = false;
-let probeFailures = 0;
+let recovering     = false;
+let probeFailures  = 0;
+let qrFirstSeenAt   = null; // set on entering 'qr', survives across refreshes
+let qrAlertSent     = false;
 
-function hardRecover(reason) {
+async function hardRecover(reason) {
   if (recovering) return;
   recovering = true;
   console.error(`🛑 Watchdog hard-recovery: ${reason}. Killing browser, exiting for pm2 restart…`);
   waUpdate({ status: 'disconnected', qrDataUrl: null });
+  // Best-effort — try to get a heads-up out before the client that might be
+  // sending it gets killed. sendAdminAlert() never throws and is capped at a
+  // few seconds, so this can't meaningfully delay recovery.
+  await sendAdminAlert(`⚠️ Jayden's Barbershop bot needs attention: ${reason}. Check http://localhost:${process.env.ADMIN_PORT || 3000} for a QR code.`);
   // Kill any Chrome bound to our WhatsApp profile so the next launch isn't
   // blocked by a stale profile lock (orphaned Chrome survives a bare exit).
   try {
@@ -204,22 +202,12 @@ function hardRecover(reason) {
   setTimeout(() => process.exit(1), 500);
 }
 
-// Send-failure detector — the wedge we actually see in production: Chrome keeps
-// receiving messages but sendMessage() times out, while getState() still passes,
-// so the liveness probe below misses it. Count consecutive send failures that
-// carry a CDP-wedge signature and hard-recover; any successful send resets it.
-const WEDGE_RE = /Runtime\.callFunctionOn timed out|Protocol error|Target closed|Execution context was destroyed|Session closed/i;
-const SEND_FAIL_LIMIT = 3;
-let sendFailures = 0;
-function noteSend(ok, errMsg = '') {
-  if (ok) { sendFailures = 0; return; }
-  if (!WEDGE_RE.test(errMsg)) return;   // ignore unrelated send errors (bad recipient, media type, etc.)
-  sendFailures++;
-  console.warn(`🐕 Send timeout ${sendFailures}/${SEND_FAIL_LIMIT} (Chrome-wedge signature): ${errMsg}`);
-  if (sendFailures >= SEND_FAIL_LIMIT) {
-    hardRecover(`${sendFailures} consecutive send timeouts — Chrome wedged`);
-  }
-}
+// Send-failure detector lives in whatsapp-client.js now — it wraps sendMessage()
+// itself, so it sees failures from every call site (this handler, the ICS
+// attachment above, training/gallery media sends, reminders, surveys, admin
+// broadcasts…), not just the ones routed through this file. Just wire the
+// recovery action to it.
+onWedgeDetected(hardRecover);
 
 // Active liveness probe: getState() round-trips through the Chrome page, so a
 // hung page makes it hang — we race it against a timeout to detect that.
@@ -251,8 +239,19 @@ setInterval(() => {
     hardRecover(`disconnected for ${Math.round(stuckMs / 1000)}s`);
   } else if ((status === 'authenticated' || status === 'initializing') && stuckMs > WATCHDOG_THRESHOLD_MS) {
     hardRecover(`stuck on '${status}' for ${Math.round(stuckMs / 1000)}s`);
+  } else if (status === 'qr' && stuckMs > QR_STUCK_THRESHOLD_MS) {
+    hardRecover(`QR code frozen — not refreshed for ${Math.round(stuckMs / 1000)}s`);
   }
-  // 'qr' and 'not-running' are intentionally left alone (await human/QR scan).
+
+  // Separate from the freeze check above: a QR that's actively refreshing
+  // but sitting unscanned needs its own alert, once, since restarting won't
+  // fix "nobody has looked yet" — it just needs a human notified.
+  if (status === 'qr' && qrFirstSeenAt && !qrAlertSent && (Date.now() - qrFirstSeenAt) > QR_UNSCANNED_ALERT_MS) {
+    qrAlertSent = true;
+    const waitedMin = Math.round((Date.now() - qrFirstSeenAt) / 60000);
+    sendAdminAlert(`⏳ Jayden's Barbershop bot has a QR code waiting to be scanned (${waitedMin} min so far). Check http://localhost:${process.env.ADMIN_PORT || 3000}.`);
+  }
+  // 'not-running' is intentionally left alone (web-only mode, no bot to recover).
 }, WATCHDOG_INTERVAL_MS);
 
 async function shutdown() {

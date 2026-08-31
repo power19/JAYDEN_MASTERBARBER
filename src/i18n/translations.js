@@ -51,6 +51,7 @@ const TRANSLATIONS = {
 
     // Time selection
     select_time:       '⏰ *Available Times*',
+    slot_taken_retry:  '😔 Sorry, that time slot was just taken by another customer. Please pick a different time.',
 
     // Name entry
     enter_name:        '👤 *Almost done!*\n\nPlease type your *full name* to reserve your spot:',
@@ -133,7 +134,7 @@ const TRANSLATIONS = {
     confirm_group:      '👥 Group',
 
     // Multi-person booking
-    collect_person_name:    '👤 *Person {n} of {total}*\n\nWhat is their name?',
+    collect_person_name:    '👤 What is the {ordinal} person\'s name?',
     collect_person_service: '✂️ *Person {n} — {name}*\n\nChoose a service:',
     group_parallel_note:    '(at the same time)',
     group_sequential_note:  '(right after)',
@@ -199,7 +200,7 @@ const TRANSLATIONS = {
     menu_language:     'Taal Wijzigen',
     menu_manage:       'Mijn Afspraak Beheren',
 
-    welcome:           '*Welkom bij {shop_name}!*\n\nKies een nummer om te beginnen. 👇',
+    welcome:           '*Welkom bij {shop_name}!*\n\nStuur één van de onderstaande nummers naar ons voor verdere informatie👇',
     menu_book:         '📅 Afspraak Maken',
     menu_services:     '💈 Diensten & Prijzen',
     menu_hours:        '⏰ Openingstijden',
@@ -227,6 +228,7 @@ const TRANSLATIONS = {
     no_slots_date:     '😔 Geen vrije plekken op *{date}*. Kies een andere dag.',
 
     select_time:       '⏰ *Beschikbare Tijden*',
+    slot_taken_retry:  '😔 Sorry, dit tijdslot is zojuist door een andere klant geboekt. Kies een andere tijd.',
 
     enter_name:        '👤 *Bijna klaar!*\n\nTyp uw *volledige naam* om uw plek te reserveren:',
     name_too_short:    '✏️ Voer uw *volledige naam* in om door te gaan.',
@@ -303,7 +305,7 @@ const TRANSLATIONS = {
     confirm_group:      '👥 Groep',
 
     // Multi-person booking
-    collect_person_name:    '👤 *Persoon {n} van {total}*\n\nNaam van de persoon?',
+    collect_person_name:    '👤 Naam van de {ordinal} persoon?',
     collect_person_service: '✂️ *Persoon {n} — {name}*\n\nKies een dienst:',
     group_parallel_note:    '(tegelijk)',
     group_sequential_note:  '(direct daarna)',
@@ -397,6 +399,7 @@ const TRANSLATIONS = {
     no_slots_date:     '😔 No hay horarios disponibles el *{date}*. Por favor elige otro día.',
 
     select_time:       '⏰ *Horarios Disponibles*',
+    slot_taken_retry:  '😔 Lo sentimos, otro cliente acaba de reservar ese horario. Por favor elige otra hora.',
 
     enter_name:        '👤 *¡Casi listo!*\n\nEscribe tu *nombre completo* para reservar tu lugar:',
     name_too_short:    '✏️ Por favor escribe tu *nombre completo* para continuar.',
@@ -473,7 +476,7 @@ const TRANSLATIONS = {
     confirm_group:      '👥 Grupo',
 
     // Multi-person booking
-    collect_person_name:    '👤 *Persona {n} de {total}*\n\n¿Cuál es su nombre?',
+    collect_person_name:    '👤 ¿Cuál es el nombre de la {ordinal} persona?',
     collect_person_service: '✂️ *Persona {n} — {name}*\n\nElige un servicio:',
     group_parallel_note:    '(al mismo tiempo)',
     group_sequential_note:  '(justo después)',
@@ -567,6 +570,7 @@ const TRANSLATIONS = {
     no_slots_date:     '😔 Aucun créneau disponible le *{date}*. Veuillez choisir un autre jour.',
 
     select_time:       '⏰ *Créneaux Disponibles*',
+    slot_taken_retry:  '😔 Désolé, ce créneau vient d\'être réservé par un autre client. Veuillez choisir une autre heure.',
 
     enter_name:        '👤 *Presque terminé !*\n\nVeuillez taper votre *nom complet* pour réserver votre place :',
     name_too_short:    '✏️ Veuillez entrer votre *nom complet* pour continuer.',
@@ -643,7 +647,7 @@ const TRANSLATIONS = {
     confirm_group:      '👥 Groupe',
 
     // Multi-person booking
-    collect_person_name:    '👤 *Personne {n} sur {total}*\n\nQuel est son nom ?',
+    collect_person_name:    '👤 Quel est le nom de la {ordinal} personne ?',
     collect_person_service: '✂️ *Personne {n} — {name}*\n\nChoisissez un service :',
     group_parallel_note:    '(en même temps)',
     group_sequential_note:  '(juste après)',
@@ -737,6 +741,7 @@ const TRANSLATIONS = {
     no_slots_date:     '😔 Nenhum horário disponível em *{date}*. Por favor escolha outro dia.',
 
     select_time:       '⏰ *Horários Disponíveis*',
+    slot_taken_retry:  '😔 Desculpe, esse horário acabou de ser reservado por outro cliente. Por favor escolha outro horário.',
 
     enter_name:        '👤 *Quase lá!*\n\nDigite seu *nome completo* para confirmar sua reserva:',
     name_too_short:    '✏️ Por favor insira seu *nome completo* para continuar.',
@@ -811,7 +816,7 @@ const TRANSLATIONS = {
     confirm_group:      '👥 Grupo',
 
     // Multi-person booking
-    collect_person_name:    '👤 *Pessoa {n} de {total}*\n\nQual é o nome dela?',
+    collect_person_name:    '👤 Qual é o nome da {ordinal} pessoa?',
     collect_person_service: '✂️ *Pessoa {n} — {name}*\n\nEscolha um serviço:',
     group_parallel_note:    '(ao mesmo tempo)',
     group_sequential_note:  '(logo em seguida)',
@@ -871,6 +876,20 @@ function t(lang, key, vars = {}) {
   return str;
 }
 
+// Group bookings are capped at 4 people (see buildGroupSizeMenu), so only 1st–4th are needed.
+const ORDINALS = {
+  en: ['first', 'second', 'third', 'fourth'],
+  nl: ['eerste', 'tweede', 'derde', 'vierde'],
+  es: ['primera', 'segunda', 'tercera', 'cuarta'],
+  fr: ['première', 'deuxième', 'troisième', 'quatrième'],
+  pt: ['primeira', 'segunda', 'terceira', 'quarta'],
+};
+
+/** Ordinal word ("first", "eerste", ...) for person n (1-based) in the given language. */
+function ordinal(lang, n) {
+  return (ORDINALS[lang] || ORDINALS.en)[n - 1] || `${n}e`;
+}
+
 const LANG_MENU_PROMPT_DEFAULT = '🌐 *Kies uw taal:*';
 const LANG_MENU_HINT_DEFAULT =
   '_Typ een cijfer of de taal (bv. *1* of *Nederlands*)_\n' +
@@ -924,4 +943,4 @@ function matchLanguage(text) {
 
 const SUPPORTED = Object.keys(TRANSLATIONS);
 
-module.exports = { t, buildLanguageMenu, matchLanguage, LANG_MAP, SUPPORTED, TRANSLATIONS };
+module.exports = { t, ordinal, buildLanguageMenu, matchLanguage, LANG_MAP, SUPPORTED, TRANSLATIONS };

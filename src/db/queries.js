@@ -192,7 +192,7 @@ function _joinEmployee(appt) {
 
 function getAppointments({ date, employeeId, status, limit = 200 } = {}) {
   let results = db.appointments.find();
-  if (date)       results = results.filter(a => (a.start_time || '').startsWith(date));
+  if (date)       results = results.filter(a => a.start_time && _dateStr(new Date(a.start_time)) === date);
   if (employeeId) results = results.filter(a => String(a.employee_id) === String(employeeId));
   if (status)     results = results.filter(a => a.status === status);
   results.sort((a,b) => (b.start_time||'').localeCompare(a.start_time||''));
@@ -202,7 +202,7 @@ function getAppointments({ date, employeeId, status, limit = 200 } = {}) {
 function getTodayAppointments() {
   const today = _dateStr(new Date());
   return db.appointments
-    .find(a => (a.start_time||'').startsWith(today) && a.status !== 'cancelled')
+    .find(a => a.start_time && _dateStr(new Date(a.start_time)) === today && a.status !== 'cancelled')
     .sort((a,b) => (a.start_time||'').localeCompare(b.start_time||''))
     .map(_joinEmployee);
 }
@@ -213,7 +213,7 @@ function getDashboardStats() {
   const now     = new Date().toISOString();
   const all     = db.appointments.find();
 
-  const todayAppts = all.filter(a => (a.start_time||'').startsWith(today));
+  const todayAppts = all.filter(a => a.start_time && _dateStr(new Date(a.start_time)) === today);
 
   return {
     today:     todayAppts.filter(a => a.status !== 'cancelled').length,
@@ -245,7 +245,47 @@ function generateBookingCode() {
   return code;
 }
 
+// If Chrome wedges mid-reply (see whatsapp-client.js wedge detector) the
+// customer never sees a confirmation, assumes the booking failed, and retries
+// the same slot — after the DB write already succeeded. Suppress an exact
+// repeat (same phone + name + service + slot) made within this window instead
+// of silently creating a second appointment.
+const DUPLICATE_BOOKING_WINDOW_MS = 5 * 60 * 1000;
+
 function createAppointment(data) {
+  const startIso = data.start_time instanceof Date ? data.start_time.toISOString() : data.start_time;
+  const endIso   = data.end_time   instanceof Date ? data.end_time.toISOString()   : data.end_time;
+
+  const dup = db.appointments.findOne(a =>
+    a.status         !== 'cancelled' &&
+    a.customer_phone === data.customer_phone &&
+    a.customer_name  === data.customer_name &&
+    a.service_id     === data.service_id &&
+    a.start_time     === startIso &&
+    (Date.now() - new Date(a.created_at).getTime()) < DUPLICATE_BOOKING_WINDOW_MS
+  );
+  if (dup) {
+    console.warn(`⚠️  Duplicate booking suppressed for ${data.customer_name} (${data.customer_phone}) @ ${startIso} — reusing ${dup.booking_code}`);
+    return { lastInsertRowid: dup.id, changes: 0, booking_code: dup.booking_code, duplicate: true };
+  }
+
+  // Authoritative overlap guard. getAvailableSlotsForEmployee() is only a
+  // pre-filter — two different customers can both read it as "free" before
+  // either has written (e.g. both picking the same slot within seconds).
+  // This check + the insert below have no `await` between them, so it's the
+  // actual serialization point that stops a double-booking from landing.
+  if (data.employee_id) {
+    const clash = db.appointments.findOne(a =>
+      a.status !== 'cancelled' &&
+      String(a.employee_id) === String(data.employee_id) &&
+      a.start_time < endIso && startIso < a.end_time
+    );
+    if (clash) {
+      console.warn(`⚠️  Slot clash refused: employee ${data.employee_id} already booked ${clash.booking_code} @ ${clash.start_time}`);
+      return { clash: true, clashBookingCode: clash.booking_code };
+    }
+  }
+
   const booking_code = generateBookingCode();
   const result = db.appointments.insert({
     booking_code,                              // ← unique 4-char code shown everywhere
@@ -258,8 +298,8 @@ function createAppointment(data) {
     service_emoji:    data.service_emoji || '',
     service_duration: +data.service_duration,
     service_price:    +data.service_price,
-    start_time:       data.start_time instanceof Date ? data.start_time.toISOString() : data.start_time,
-    end_time:         data.end_time   instanceof Date ? data.end_time.toISOString()   : data.end_time,
+    start_time:       startIso,
+    end_time:         endIso,
     google_event_id:   data.google_event_id  || '',
     google_event_link: data.google_event_link || '',
     status:           data.status || 'confirmed',
@@ -578,7 +618,7 @@ async function getAvailableSlotsForEmployee(employee, date, serviceDuration, { e
 
   // ── Local DB conflicts ────────────────────────────────────────────────────────
   const booked = db.appointments.find(a =>
-    (a.start_time||'').startsWith(dateStr) &&
+    a.start_time && _dateStr(new Date(a.start_time)) === dateStr &&
     String(a.employee_id) === String(employee.id) &&
     a.status !== 'cancelled' &&
     (!excludeId || String(a.id) !== String(excludeId))   // skip the appt being rescheduled
@@ -703,13 +743,13 @@ async function getAvailableSlotsForGroup(employees, date, duration, groupSize) {
  * Returns slots with assignments: [{ personIdx, employeeId, start, end }, ...]
  */
 async function getAvailableSlotsForParallelGroup(persons, employees, date) {
-  const dateStr = date.toISOString().split('T')[0];
+  const dateStr = _dateStr(date);
 
   // Build appointment count per employee on this date (for fair-share sorting)
   const apptCount = new Map();
   for (const emp of employees) {
     apptCount.set(emp.id, db.appointments.count(a =>
-      (a.start_time || '').startsWith(dateStr) &&
+      a.start_time && _dateStr(new Date(a.start_time)) === dateStr &&
       String(a.employee_id) === String(emp.id) &&
       a.status !== 'cancelled'
     ));
@@ -848,7 +888,7 @@ async function getAvailableSlotsForSequentialGroup(persons, employees, date) {
  * Returns slots with assignments covering all persons.
  */
 async function getAvailableSlotsForBatchGroup(persons, employees, date) {
-  const dateStr = date.toISOString().split('T')[0];
+  const dateStr = _dateStr(date);
 
   // Only barbers actually working this day take part. Otherwise, on a day where
   // one barber is off (e.g. melly on Sundays), a group of 3+ would wrongly require
@@ -868,7 +908,7 @@ async function getAvailableSlotsForBatchGroup(persons, employees, date) {
   const apptCount = new Map();
   for (const emp of employees) {
     apptCount.set(emp.id, db.appointments.count(a =>
-      (a.start_time || '').startsWith(dateStr) &&
+      a.start_time && _dateStr(new Date(a.start_time)) === dateStr &&
       String(a.employee_id) === String(emp.id) &&
       a.status !== 'cancelled'
     ));
@@ -967,7 +1007,7 @@ function pickLeastBusyEmployee(employeeIds, dateStr) {
   const counts = employeeIds.map(id => ({
     id,
     count: db.appointments.count(a =>
-      (a.start_time||'').startsWith(dateStr) &&
+      a.start_time && _dateStr(new Date(a.start_time)) === dateStr &&
       String(a.employee_id) === String(id) &&
       a.status !== 'cancelled'
     ),
