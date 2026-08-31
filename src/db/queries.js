@@ -75,6 +75,26 @@ const getEmployeesForService = (serviceId) =>
 const toggleEmployee     = id   => db.employees.toggle(id, 'is_active');
 
 /**
+ * Permanently removes an employee. Refused if any appointment (past or
+ * upcoming) references them — appointments only store employee_id and look
+ * the barber's name/color up live (see _joinEmployee), so deleting a barber
+ * with history would leave those records showing a blank barber. Deactivate
+ * (toggleEmployee) instead for a barber who has ever taken a booking; this
+ * is only for removing an empty/mistakenly-added entry.
+ */
+function deleteEmployee(id) {
+  if (db.appointments.count(a => String(a.employee_id) === String(id)) > 0) {
+    const err = new Error('This barber has appointment history and can\'t be deleted — deactivate them instead.');
+    err.code = 'HAS_APPOINTMENTS';
+    throw err;
+  }
+  db.businessHours.remove(r => String(r.employee_id) === String(id));
+  db.leaves.remove(l => String(l.employee_id) === String(id));
+  db.blockedDates.remove(b => String(b.employee_id) === String(id));
+  return db.employees.removeById(id);
+}
+
+/**
  * Returns true if the employee has an "away today" all-day block for today.
  */
 function isEmployeeAwayToday(employeeId) {
@@ -1218,7 +1238,7 @@ function _toAmPm(h, m)  {
 
 module.exports = {
   getSetting, setSetting, getAllSettings, setManySettings,
-  getEmployees, getActiveEmployees, getEmployee, getEmployeesForService, createEmployee, updateEmployee, toggleEmployee, getBarberForPhone,
+  getEmployees, getActiveEmployees, getEmployee, getEmployeesForService, createEmployee, updateEmployee, toggleEmployee, deleteEmployee, getBarberForPhone,
   isEmployeeAwayToday, toggleEmployeeAwayToday,
   getHoursForDay, getWeeklyHours, setWeeklyHours,
   getActiveServices, getAllServices, getService, upsertService, toggleService, deleteService,

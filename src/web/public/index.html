@@ -719,6 +719,7 @@
                             :class="e.is_active ? 'btn-danger' : 'btn-primary'"
                             class="text-xs py-1 px-3 rounded-xl font-semibold transition"
                             x-text="e.is_active ? 'Deactivate' : 'Activate'"></button>
+                    <button @click="deleteEmployee(e)" class="btn-secondary text-xs py-1 px-3 text-red-500">🗑️ Delete</button>
                   </div>
                 </td>
               </tr>
@@ -2875,6 +2876,14 @@ function app() {
     async toggleEmployee(id) {
       await this.api('POST', `/api/employees/${id}/toggle`);
       this.employees = await this.api('GET', '/api/employees');
+    },
+
+    async deleteEmployee(emp) {
+      if (!confirm(`Permanently delete ${emp.name}? This cannot be undone.\n\nOnly possible if they have no appointment history — if they've ever had a booking, deactivate them instead.`)) return;
+      const result = await this.api('DELETE', `/api/employees/${emp.id}`);
+      if (result.error) { this.showToast(`❌ ${result.error}`); return; }
+      this.employees = this.employees.filter(e => e.id !== emp.id);
+      this.showToast(`🗑️ ${emp.name} deleted`);
     },
 
     // ── Surinamese holidays ───────────────────────────────────────────────────

@@ -629,6 +629,15 @@ router.post('/employees/:id/toggle', (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+router.delete('/employees/:id', (req, res) => {
+  try {
+    q.deleteEmployee(req.params.id);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(e.code === 'HAS_APPOINTMENTS' ? 409 : 500).json({ error: e.message });
+  }
+});
+
 // ── Business Hours ────────────────────────────────────────────────────────────
 
 // GET global hours
