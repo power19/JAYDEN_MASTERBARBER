@@ -35,6 +35,13 @@ const num       = i => NUM[i] || `*${i + 1}.*`;
 const PAGE_SIZE = 10; // max time slots shown per page
 const CUR = () => q.getSetting('currency') || 'SRD';
 
+// A group booking can only use as many barbers at once as are actually
+// active, and never more than the shop-wide cap (Settings → Booking) — e.g.
+// with 3 active barbers and the shop currently limited to 3 at a time, a
+// group of 4 has nobody left to serve the 4th person simultaneously.
+const maxGroupSize = (numBarbers) =>
+  Math.max(1, Math.min(numBarbers, +q.getSetting('max_group_size') || 3));
+
 // Thrown by bookOne() when createAppointment() refuses a write because another
 // customer's booking landed on the same employee/time first (see the overlap
 // guard in queries.js). Caught in finalizeBooking/onConfirmMulti to bounce the
@@ -485,7 +492,7 @@ async function onGroupSize(userId, text, session) {
   }
 
   const { employees } = session;
-  const maxAllowed = Math.min(employees.length * 2, 4);
+  const maxAllowed = maxGroupSize(employees.length);
   const n = parseInt(text, 10);
 
   if (isNaN(n) || n < 1 || n > maxAllowed) {
@@ -1834,8 +1841,7 @@ function buildServiceList(lang) {
 }
 
 function buildGroupSizeMenu(lang, service, maxBarbers) {
-  // Allow up to 2× barbers (overflow), hard cap at 4
-  const maxAllowed = Math.min(maxBarbers * 2, 4);
+  const maxAllowed = maxGroupSize(maxBarbers);
   const lines = [];
   for (let i = 1; i <= maxAllowed; i++) {
     let label = i === 1

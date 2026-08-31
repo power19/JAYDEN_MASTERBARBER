@@ -85,6 +85,7 @@ function seedIfEmpty() {
     admin_password:       process.env.ADMIN_PASSWORD || 'admin',
     bot_paused:           '0',
     allow_any_employee:   '1',
+    max_group_size:       '3',   // hard cap on people per group booking, regardless of barber count
     shop_name:            process.env.SHOP_NAME        || "Jayden's Barbershop",
     shop_address:         process.env.SHOP_ADDRESS     || 'Paramaribo, Suriname',
     shop_phone:           process.env.SHOP_PHONE       || '',

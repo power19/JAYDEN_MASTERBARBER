@@ -876,7 +876,9 @@ function t(lang, key, vars = {}) {
   return str;
 }
 
-// Group bookings are capped at 4 people (see buildGroupSizeMenu), so only 1st–4th are needed.
+// Group bookings are capped at the `max_group_size` setting (see maxGroupSize()
+// in conversationHandler.js); this list covers up to 4th, with a numeric
+// fallback below for anything beyond that.
 const ORDINALS = {
   en: ['first', 'second', 'third', 'fourth'],
   nl: ['eerste', 'tweede', 'derde', 'vierde'],

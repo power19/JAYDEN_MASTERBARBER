@@ -1759,6 +1759,11 @@
               Show <strong>"Any Available Barber"</strong> option in booking flow
             </label>
           </div>
+          <div>
+            <label class="label">Max People per Group Booking</label>
+            <input type="number" x-model="settings.max_group_size" class="input w-24" min="1" max="10" placeholder="3">
+            <p class="text-xs text-slate-400 mt-1">Customers can never book for more people than there are active barbers, and never more than this number either way — e.g. with 2 active barbers, the group option stops at 2 people regardless of this setting.</p>
+          </div>
         </div>
 
         <!-- New Customer Policy -->
