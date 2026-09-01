@@ -2879,7 +2879,7 @@ function app() {
     },
 
     async deleteEmployee(emp) {
-      if (!confirm(`Permanently delete ${emp.name}? This cannot be undone.\n\nOnly possible if they have no appointment history — if they've ever had a booking, deactivate them instead.`)) return;
+      if (!confirm(`Permanently delete ${emp.name}? This cannot be undone.\n\nThey'll be removed from the barber list and booking flow. Their past appointments stay on record with the name "${emp.name}" attached, but won't be linked to a live barber anymore (e.g. can't reassign their schedule).`)) return;
       const result = await this.api('DELETE', `/api/employees/${emp.id}`);
       if (result.error) { this.showToast(`❌ ${result.error}`); return; }
       this.employees = this.employees.filter(e => e.id !== emp.id);

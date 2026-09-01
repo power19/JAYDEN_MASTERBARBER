@@ -75,19 +75,21 @@ const getEmployeesForService = (serviceId) =>
 const toggleEmployee     = id   => db.employees.toggle(id, 'is_active');
 
 /**
- * Permanently removes an employee. Refused if any appointment (past or
- * upcoming) references them — appointments only store employee_id and look
- * the barber's name/color up live (see _joinEmployee), so deleting a barber
- * with history would leave those records showing a blank barber. Deactivate
- * (toggleEmployee) instead for a barber who has ever taken a booking; this
- * is only for removing an empty/mistakenly-added entry.
+ * Permanently removes an employee. Appointments only store employee_id and
+ * resolve the barber's name/color live (see _joinEmployee) — so before the
+ * employee record disappears, their name/color is frozen onto every
+ * appointment that references them (employee_name/employee_color), which
+ * _joinEmployee falls back to once the live lookup misses. Past bookings
+ * keep showing the right barber; only the live employee record is gone.
  */
 function deleteEmployee(id) {
-  if (db.appointments.count(a => String(a.employee_id) === String(id)) > 0) {
-    const err = new Error('This barber has appointment history and can\'t be deleted — deactivate them instead.');
-    err.code = 'HAS_APPOINTMENTS';
-    throw err;
-  }
+  const emp = db.employees.findOne(e => String(e.id) === String(id));
+  if (!emp) return { changes: 0 };
+
+  db.appointments.find(a => String(a.employee_id) === String(id)).forEach(a =>
+    db.appointments.updateById(a.id, { employee_name: emp.name, employee_color: emp.color })
+  );
+
   db.businessHours.remove(r => String(r.employee_id) === String(id));
   db.leaves.remove(l => String(l.employee_id) === String(id));
   db.blockedDates.remove(b => String(b.employee_id) === String(id));
@@ -207,7 +209,13 @@ const setManyMessages = obj => Object.entries(obj).forEach(([k,v]) => setBotMess
 
 function _joinEmployee(appt) {
   const emp = db.employees.findOne(e => e.id === appt.employee_id);
-  return { ...appt, employee_name: emp?.name || null, employee_color: emp?.color || null };
+  // Falls back to the appointment's own frozen employee_name/employee_color
+  // (set by deleteEmployee() below) once the barber no longer has a live record.
+  return {
+    ...appt,
+    employee_name:  emp?.name  || appt.employee_name  || null,
+    employee_color: emp?.color || appt.employee_color || null,
+  };
 }
 
 function getAppointments({ date, employeeId, status, limit = 200 } = {}) {
