@@ -24,10 +24,26 @@ const setManySettings = obj     => db.settings.setMany(obj);
 const getEmployees       = ()    => db.employees.find().sort((a,b) => a.id - b.id);
 const getActiveEmployees = ()    => db.employees.find(e => e.is_active).sort((a,b) => a.id - b.id);
 const getEmployee        = id    => db.employees.findOne(e => String(e.id) === String(id));
-const createEmployee     = (name, phone, color, gcalId, excludedServiceIds) =>
-  db.employees.insert({ name, phone: phone||'', color: color||'#f59e0b', google_calendar_id: gcalId||'', is_active: 1, excluded_service_ids: excludedServiceIds||[], scan_pin: '' });
-const updateEmployee     = (id, data) =>
-  db.employees.updateById(id, { name: data.name, phone: data.phone||'', color: data.color, google_calendar_id: data.google_calendar_id||'', excluded_service_ids: data.excluded_service_ids||[], fixed_customer_phones: data.fixed_customer_phones||[], fallback_employee_ids: data.fallback_employee_ids||[] });
+/** True if another currently-active barber is already using this color (the schedule/legend only needs to disambiguate people working right now). */
+const isColorTaken = (color, excludeId) =>
+  db.employees.find(e => e.is_active && String(e.id) !== String(excludeId)).some(e => e.color === color);
+
+function _assertColorFree(color, excludeId) {
+  if (color && isColorTaken(color, excludeId)) {
+    const err = new Error('That color is already used by another active barber — pick a different one.');
+    err.code = 'COLOR_TAKEN';
+    throw err;
+  }
+}
+
+const createEmployee     = (name, phone, color, gcalId, excludedServiceIds) => {
+  _assertColorFree(color);
+  return db.employees.insert({ name, phone: phone||'', color: color||'#f59e0b', google_calendar_id: gcalId||'', is_active: 1, excluded_service_ids: excludedServiceIds||[], scan_pin: '' });
+};
+const updateEmployee     = (id, data) => {
+  _assertColorFree(data.color, id);
+  return db.employees.updateById(id, { name: data.name, phone: data.phone||'', color: data.color, google_calendar_id: data.google_calendar_id||'', excluded_service_ids: data.excluded_service_ids||[], fixed_customer_phones: data.fixed_customer_phones||[], fallback_employee_ids: data.fallback_employee_ids||[] });
+};
 
 /**
  * Returns the active employee whose fixed_customer_phones list contains this phone number.

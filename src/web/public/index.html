@@ -2148,14 +2148,17 @@
           <label class="label">Color <span class="normal-case font-normal text-slate-400">— matches Google Calendar</span></label>
           <div class="flex gap-2 flex-wrap mt-1">
             <template x-for="c in gcalColors" :key="c.hex">
-              <button type="button" @click="employeeForm.color = c.hex"
-                :title="c.name"
-                class="w-8 h-8 rounded-full border-2 transition"
-                :class="employeeForm.color === c.hex ? 'border-slate-800 scale-110' : 'border-transparent'"
-                :style="`background:${c.hex}`"></button>
+              <button type="button" @click="!colorTakenBy(c.hex) && (employeeForm.color = c.hex)"
+                :title="colorTakenBy(c.hex) ? `${c.name} — already used by ${colorTakenBy(c.hex)}` : c.name"
+                class="w-8 h-8 rounded-full border-2 transition relative"
+                :class="[employeeForm.color === c.hex ? 'border-slate-800 scale-110' : 'border-transparent', colorTakenBy(c.hex) ? 'opacity-30 cursor-not-allowed' : '']"
+                :style="`background:${c.hex}`">
+                <span x-show="colorTakenBy(c.hex)" class="absolute inset-0 flex items-center justify-center text-white text-xs">✕</span>
+              </button>
             </template>
           </div>
-          <p class="text-xs text-slate-400 mt-1" x-text="gcalColors.find(c => c.hex === employeeForm.color)?.name || ''"></p>
+          <p class="text-xs text-slate-400 mt-1" x-text="colorTakenBy(employeeForm.color) ? `⚠️ Already used by ${colorTakenBy(employeeForm.color)}` : (gcalColors.find(c => c.hex === employeeForm.color)?.name || '')"
+             :class="colorTakenBy(employeeForm.color) ? 'text-amber-600 font-medium' : ''"></p>
         </div>
         <div>
           <label class="label">Google Calendar ID <span class="normal-case font-normal">(optional)</span></label>
@@ -2871,6 +2874,16 @@ function app() {
       this.employees = await this.api('GET', '/api/employees');
       this.showEmployeeModal = false;
       this.showToast(this.editingEmployee ? '✅ Barber updated!' : '✅ Barber added!');
+    },
+
+    // Name of the active barber (other than the one in the modal) already using
+    // this color, or '' if it's free. Mirrors the server-side check in
+    // createEmployee/updateEmployee so the picker doesn't offer a color that
+    // would just get rejected on save.
+    colorTakenBy(hex) {
+      const editingId = this.editingEmployee?.id;
+      const other = this.employees.find(e => e.is_active && e.color === hex && String(e.id) !== String(editingId));
+      return other?.name || '';
     },
 
     async toggleEmployee(id) {
