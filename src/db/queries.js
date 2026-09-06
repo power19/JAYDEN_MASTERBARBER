@@ -979,6 +979,28 @@ async function getAvailableSlotsForBatchGroup(persons, employees, date) {
 
   const results = [];
 
+  // Real per-employee availability (respects existing bookings, business
+  // hours, blocked dates/leave) for every duration any person needs — the
+  // stacking loop below must land remaining people on one of these, never on
+  // a bare "previous person's end time" arithmetic guess. That guess doesn't
+  // know a *different* appointment (made through any other flow) already
+  // sits there, or that it's past closing time — it would just stack the
+  // next person on top of it, the write gets rejected by the overlap guard,
+  // and (worst case, e.g. only one barber working that day) the exact same
+  // wrong guess repeats on every retry with no way to ever succeed.
+  const durations = [...new Set(persons.map(p => p.service.duration))];
+  const realSlotsByEmpDur = new Map(); // empId → dur → sorted [{startMs, endMs}]
+  for (const emp of employees) {
+    const byDur = new Map();
+    for (const dur of durations) {
+      const slots = await getAvailableSlotsForEmployee(emp, date, dur);
+      byDur.set(dur, slots
+        .map(s => ({ startMs: s.start.getTime(), endMs: s.end.getTime() }))
+        .sort((a, b) => a.startMs - b.startMs));
+    }
+    realSlotsByEmpDur.set(emp.id, byDur);
+  }
+
   for (const slot of batch0Slots) {
     const allAssignments = slot.assignments.map(a => ({ ...a }));
 
@@ -1006,29 +1028,29 @@ async function getAvailableSlotsForBatchGroup(persons, employees, date) {
     for (const { person, personIdx } of remainingPersons) {
       const dur = person.service.duration;
 
-      // Pick the barber who becomes free soonest; break ties by least busy overall
-      let bestEmpId = null;
-      let bestFreeAt = Infinity;
-      let bestCount = Infinity;
+      // Among all barbers, take the earliest REAL slot at/after when they
+      // become free — not "free time + duration", which could land past
+      // closing or on an appointment this stacking has no visibility into.
+      let bestEmpId = null, bestStart = Infinity, bestEnd = null, bestCount = Infinity;
       for (const [empId, freeAt] of barberFreeAt) {
+        const next = (realSlotsByEmpDur.get(empId)?.get(dur) || []).find(c => c.startMs >= freeAt);
+        if (!next) continue;
         const cnt = apptCount.get(empId) || 0;
-        if (freeAt < bestFreeAt || (freeAt === bestFreeAt && cnt < bestCount)) {
-          bestFreeAt = freeAt; bestEmpId = empId; bestCount = cnt;
+        if (next.startMs < bestStart || (next.startMs === bestStart && cnt < bestCount)) {
+          bestEmpId = empId; bestStart = next.startMs; bestEnd = next.endMs; bestCount = cnt;
         }
       }
 
-      if (!bestEmpId) { valid = false; break; }
+      if (bestEmpId == null) { valid = false; break; }
 
-      const startMs = bestFreeAt;
-      const endMs   = startMs + dur * 60000;
-      barberFreeAt.set(bestEmpId, endMs); // barber is now busy until endMs
+      barberFreeAt.set(bestEmpId, bestEnd); // barber is now busy until bestEnd
 
       allAssignments.push({
         personIdx,
         employeeId: bestEmpId,
-        start:   new Date(startMs).toISOString(),
-        end:     new Date(endMs).toISOString(),
-        display: fmtDisplay(startMs),
+        start:   new Date(bestStart).toISOString(),
+        end:     new Date(bestEnd).toISOString(),
+        display: fmtDisplay(bestStart),
       });
     }
 
