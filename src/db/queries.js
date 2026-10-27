@@ -367,6 +367,52 @@ const isPhoneBlocked = (phone) => {
   return c?.is_blocked === 1;
 };
 
+// ── Customer-specific pricing ─────────────────────────────────────────────────
+
+/**
+ * Returns every special price configured, joined with the customer's name and
+ * the service's name/standard price (for display).
+ */
+function getCustomerPrices() {
+  return db.customerPrices.find()
+    .map(r => {
+      const customer = db.customers.findOne(c => String(c.id) === String(r.customer_id));
+      const service  = db.services.findOne(s => String(s.id) === String(r.service_id));
+      return {
+        ...r,
+        customer_name:  customer?.name || '(unknown customer)',
+        service_name:   service?.name  || '(unknown service)',
+        standard_price: service ? +service.price : null,
+      };
+    })
+    .sort((a, b) => a.customer_name.localeCompare(b.customer_name) || a.service_name.localeCompare(b.service_name));
+}
+
+/** Create or update the special price for one customer+service combo. */
+function setCustomerPrice({ customerId, serviceId, price }) {
+  return db.customerPrices.upsert(
+    r => String(r.customer_id) === String(customerId) && String(r.service_id) === String(serviceId),
+    { customer_id: +customerId, service_id: serviceId, price: +price }
+  );
+}
+
+const deleteCustomerPrice = (id) => db.customerPrices.removeById(id);
+
+/**
+ * Returns the special price (a number) set for this customer+service, or null
+ * if none is configured. Used by the bot to override the standard service
+ * price when a customer with a special price books that service.
+ */
+function getSpecialPrice(customerPhone, serviceId) {
+  const customer = getCustomerByPhone(customerPhone);
+  if (!customer) return null;
+  const row = db.customerPrices.findOne(r =>
+    String(r.customer_id) === String(customer.id) &&
+    String(r.service_id)  === String(serviceId)
+  );
+  return row ? +row.price : null;
+}
+
 // ── Blocked dates / time-off ──────────────────────────────────────────────────
 
 /**
@@ -798,4 +844,5 @@ module.exports = {
   getCustomerByPhone, getAllCustomers, getAllCustomersWithStats,
   getOrCreateCustomer, addPhoneToCustomer, removePhoneFromCustomer,
   blockCustomer, unblockCustomer, updateCustomer, isPhoneBlocked,
+  getCustomerPrices, setCustomerPrice, deleteCustomerPrice, getSpecialPrice,
 };

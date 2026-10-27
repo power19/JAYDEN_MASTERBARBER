@@ -83,6 +83,7 @@
       <button @click="nav('services')"    :class="page==='services'    ? 'active' : ''" class="sidebar-link w-full text-left">✂️ Services</button>
       <button @click="nav('gallery')"      :class="page==='gallery'      ? 'active' : ''" class="sidebar-link w-full text-left">📸 Gallery</button>
       <button @click="nav('customers')"   :class="page==='customers'   ? 'active' : ''" class="sidebar-link w-full text-left">👤 Customers</button>
+      <button @click="nav('pricing')"     :class="page==='pricing'     ? 'active' : ''" class="sidebar-link w-full text-left">💰 Pricing</button>
       <button @click="nav('messages')"    :class="page==='messages'    ? 'active' : ''" class="sidebar-link w-full text-left">✉️ Bot Messages</button>
       <button @click="nav('settings')"    :class="page==='settings'    ? 'active' : ''" class="sidebar-link w-full text-left">⚙️ Settings</button>
     </nav>
@@ -1320,6 +1321,47 @@
       </div>
     </div>
 
+    <!-- ── PRICING ──────────────────────────────────────────────── -->
+    <div x-show="page === 'pricing'" class="p-8">
+      <div class="flex justify-between items-center mb-2">
+        <h2 class="text-2xl font-bold text-slate-800">💰 Special Pricing</h2>
+        <button @click="openPriceModal()" class="btn-primary text-sm">+ Add Special Price</button>
+      </div>
+      <p class="text-slate-400 text-sm mb-6">Give a specific customer a different price for a specific service — it overrides the standard price whenever they book that service via WhatsApp.</p>
+
+      <div x-show="customerPrices.length === 0" class="card text-center text-slate-400 py-12">
+        No special prices set yet.
+      </div>
+
+      <div class="card p-0 overflow-hidden" x-show="customerPrices.length > 0">
+        <table class="w-full text-sm">
+          <thead class="bg-slate-50 text-slate-500 text-xs uppercase">
+            <tr>
+              <th class="text-left px-4 py-2">Customer</th>
+              <th class="text-left px-4 py-2">Service</th>
+              <th class="text-right px-4 py-2">Standard</th>
+              <th class="text-right px-4 py-2">Special</th>
+              <th class="px-4 py-2"></th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="row in customerPrices" :key="row.id">
+              <tr class="border-t border-slate-100">
+                <td class="px-4 py-2 font-medium text-slate-700" x-text="row.customer_name"></td>
+                <td class="px-4 py-2 text-slate-600" x-text="row.service_name"></td>
+                <td class="px-4 py-2 text-right text-slate-400" x-text="settings.currency + ' ' + row.standard_price"></td>
+                <td class="px-4 py-2 text-right font-semibold text-emerald-600" x-text="settings.currency + ' ' + row.price"></td>
+                <td class="px-4 py-2 text-right whitespace-nowrap">
+                  <button @click="openPriceModal(row)" class="text-slate-400 hover:text-slate-600 mr-2" title="Edit">✏️</button>
+                  <button @click="deleteCustomerPrice(row.id)" class="text-slate-400 hover:text-red-500" title="Remove">🗑️</button>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
     <!-- ── BOT MESSAGES ──────────────────────────────────────────── -->
     <div x-show="page === 'messages'" class="p-8">
       <div class="flex justify-between items-center mb-6">
@@ -1767,6 +1809,65 @@
   </div>
 </template>
 
+<!-- ── Special Price Modal ─────────────────────────────────────────────────── -->
+<template x-if="showPriceModal">
+  <div class="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"
+       @click.self="showPriceModal=false">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6"
+         x-transition:enter="transition ease-out duration-200"
+         x-transition:enter-start="opacity-0 scale-95"
+         x-transition:enter-end="opacity-100 scale-100">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="text-lg font-bold text-slate-800" x-text="editingPriceId ? 'Edit Special Price' : 'Add Special Price'"></h3>
+        <button @click="showPriceModal=false" class="text-slate-400 hover:text-slate-600 text-xl leading-none">&times;</button>
+      </div>
+
+      <div class="space-y-4">
+        <div>
+          <label class="label">Customer</label>
+          <template x-if="!editingPriceId">
+            <div>
+              <input x-model="priceCustomerSearch" class="input text-sm" placeholder="Type a name to search…" autocomplete="off">
+              <div x-show="priceCustomerSearch.length > 0" class="mt-1 border border-slate-200 rounded-xl overflow-hidden shadow-sm max-h-40 overflow-y-auto">
+                <template x-for="c in customers.filter(c =>
+                    c.name && c.name.toLowerCase().includes(priceCustomerSearch.toLowerCase())
+                  ).slice(0, 6)" :key="c.id">
+                  <button @click="priceForm.customer_id = c.id; priceCustomerSearch = c.name"
+                    class="w-full text-left px-3 py-2 text-sm hover:bg-amber-50 border-b border-slate-100 last:border-0"
+                    x-text="c.name"></button>
+                </template>
+                <p x-show="customers.filter(c => c.name && c.name.toLowerCase().includes(priceCustomerSearch.toLowerCase())).length === 0"
+                   class="text-xs text-slate-400 px-3 py-2 italic">No matching customers found.</p>
+              </div>
+            </div>
+          </template>
+          <p x-show="editingPriceId" class="text-sm font-medium text-slate-700" x-text="priceCustomerSearch"></p>
+        </div>
+        <div>
+          <label class="label">Service</label>
+          <select x-model="priceForm.service_id" class="input" :disabled="!!editingPriceId"
+                  @change="if (!priceForm.price) priceForm.price = services.find(s => s.id === priceForm.service_id)?.price ?? ''">
+            <option value="">— Select —</option>
+            <template x-for="s in services.filter(s => s.is_active)" :key="s.id">
+              <option :value="s.id" x-text="s.name + ' (' + settings.currency + ' ' + s.price + ')'"></option>
+            </template>
+          </select>
+        </div>
+        <div>
+          <label class="label">Special Price (<span x-text="settings.currency"></span>)</label>
+          <input type="number" min="0" step="1" x-model="priceForm.price" class="input" placeholder="e.g. 20">
+        </div>
+        <p x-show="priceForm.error" class="text-red-500 text-sm" x-text="priceForm.error"></p>
+      </div>
+
+      <div class="flex gap-3 mt-6">
+        <button @click="saveCustomerPrice()" class="btn-primary flex-1">Save</button>
+        <button @click="showPriceModal=false" class="btn-secondary flex-1">Cancel</button>
+      </div>
+    </div>
+  </div>
+</template>
+
 <!-- ── Service Modal ───────────────────────────────────────────────────────── -->
 <template x-if="showServiceModal">
   <div class="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"
@@ -1863,6 +1964,13 @@ function app() {
     customerFilter: 'all',  // 'all' | 'noshows' | 'blocked'
     addPhoneInputs: {},      // { customerId: phoneValue }
     blockReasonInputs: {},   // { customerId: reasonValue }
+
+    // Special pricing (per customer, per service)
+    customerPrices: [],
+    showPriceModal: false,
+    editingPriceId: null,
+    priceForm: { customer_id: '', service_id: '', price: '', error: '' },
+    priceCustomerSearch: '',
 
     // Human takeover — paused chats
     pausedChats: [],
@@ -2033,6 +2141,12 @@ function app() {
         await this.loadLeaves();
       }
       if (p === 'customers')    this.customers   = await this.api('GET', '/api/customers');
+      if (p === 'pricing') {
+        if (!this.customers.length) this.customers = await this.api('GET', '/api/customers');
+        if (!this.services.length)  this.services  = await this.api('GET', '/api/services');
+        if (!this.settings.currency) this.settings = await this.api('GET', '/api/settings');
+        this.customerPrices = await this.api('GET', '/api/customer-prices');
+      }
       if (p === 'messages')     this.botMessages = await this.api('GET', '/api/messages');
       if (p === 'settings') {
         this.settings = await this.api('GET', '/api/settings');
@@ -2250,6 +2364,40 @@ function app() {
     async toggleEmployee(id) {
       await this.api('POST', `/api/employees/${id}/toggle`);
       this.employees = await this.api('GET', '/api/employees');
+    },
+
+    // ── Special pricing ───────────────────────────────────────────────────────
+
+    openPriceModal(row = null) {
+      this.editingPriceId = row ? row.id : null;
+      this.priceForm = row
+        ? { customer_id: row.customer_id, service_id: row.service_id, price: row.price, error: '' }
+        : { customer_id: '', service_id: '', price: '', error: '' };
+      this.priceCustomerSearch = row ? row.customer_name : '';
+      this.showPriceModal = true;
+    },
+
+    async saveCustomerPrice() {
+      const f = this.priceForm;
+      if (!f.customer_id || !f.service_id || f.price === '' || f.price === null) {
+        this.priceForm.error = 'Please fill in all fields.'; return;
+      }
+      const res = await this.api('PUT', '/api/customer-prices', {
+        customer_id: f.customer_id,
+        service_id:  f.service_id,
+        price:       f.price,
+      });
+      if (res.error) { this.priceForm.error = res.error; return; }
+      this.showPriceModal = false;
+      this.customerPrices = await this.api('GET', '/api/customer-prices');
+      this.showToast('✅ Special price saved!');
+    },
+
+    async deleteCustomerPrice(id) {
+      if (!confirm('Remove this special price?')) return;
+      await this.api('DELETE', `/api/customer-prices/${id}`);
+      this.customerPrices = await this.api('GET', '/api/customer-prices');
+      this.showToast('🗑️ Removed');
     },
 
     // ── Surinamese holidays ───────────────────────────────────────────────────

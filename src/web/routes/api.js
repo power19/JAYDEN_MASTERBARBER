@@ -571,6 +571,29 @@ router.delete('/services/:id', (req, res) => {
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── Customer-specific pricing ─────────────────────────────────────────────────
+
+router.get('/customer-prices', (req, res) => {
+  try { res.json(q.getCustomerPrices()); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.put('/customer-prices', (req, res) => {
+  try {
+    const { customer_id, service_id, price } = req.body;
+    if (!customer_id || !service_id || price == null || price === '') {
+      return res.status(400).json({ error: 'customer_id, service_id and price are required' });
+    }
+    q.setCustomerPrice({ customerId: customer_id, serviceId: service_id, price });
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.delete('/customer-prices/:id', (req, res) => {
+  try { q.deleteCustomerPrice(req.params.id); res.json({ ok: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── Bot Messages ──────────────────────────────────────────────────────────────
 
 router.get('/messages', (req, res) => {

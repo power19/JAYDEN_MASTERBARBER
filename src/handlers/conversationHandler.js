@@ -279,12 +279,19 @@ async function onService(userId, text, session) {
     return `${t(lang, 'invalid_choice', { max: pageCount })}\n\n${buildServiceMenu(lang, true, page)}`;
   }
 
-  const service = services[actualIdx];
+  let service  = services[actualIdx];
   let employees = q.getEmployeesForService(service.id);
 
   if (employees.length === 0) {
     return t(lang, 'no_barbers_service', { service: service.name });
   }
+
+  // Apply this customer's special price for this service, if one is set —
+  // overrides the standard price for every step from here on (summary,
+  // appointment record, calendar event, dashboard revenue).
+  const customerPhone = userId.replace(/@\S+$/, '');
+  const special = q.getSpecialPrice(customerPhone, service.id);
+  if (special != null) service = { ...service, price: special };
 
   // New customer logic — route to the designated barber if configured
   if (session.isNewCustomer) {

@@ -19,6 +19,7 @@ const db = {
   customers:     new JsonCollection(path.join(DATA_DIR, 'customers.json')),
   photos:        new JsonCollection(path.join(DATA_DIR, 'photos.json')),
   leaves:        new JsonCollection(path.join(DATA_DIR, 'leaves.json')),
+  customerPrices: new JsonCollection(path.join(DATA_DIR, 'customer_prices.json')),
   settings:      new JsonKVStore(path.join(DATA_DIR, 'settings.json')),
 };
 
