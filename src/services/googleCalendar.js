@@ -7,6 +7,7 @@
  */
 const { google } = require('googleapis');
 const path       = require('path');
+const { mapsLinkFor } = require('../utils/geo');
 
 const DEFAULT_CALENDAR_ID = process.env.GOOGLE_CALENDAR_ID || 'primary';
 const CREDENTIALS_PATH    = process.env.GOOGLE_CREDENTIALS_PATH ||
@@ -38,6 +39,20 @@ function hexToCalColorId(hex) {
   return match ? match.id : '7';
 }
 
+// Colored-circle emoji per Google colorId. Google's mobile app shows every event
+// on a *shared* calendar in one flat color, ignoring per-event colorId — so we also
+// stamp a matching colored dot into the event title. The dot is plain text, so it
+// survives in every client and lets viewers tell barbers apart at a glance.
+const CIRCLE_BY_COLOR_ID = {
+  '1': '🔵', '2': '🟢', '3': '🟣', '4': '🔴', '5': '🟡', '6': '🟠',
+  '7': '🔵', '8': '⚫', '9': '🔵', '10': '🟢', '11': '🔴',
+};
+
+/** Returns a colored-circle emoji for a barber's hex color (matches the calendar colorId). */
+function hexToCircleEmoji(hex) {
+  return CIRCLE_BY_COLOR_ID[hexToCalColorId(hex)] || '🔵';
+}
+
 
 let _auth = null;
 
@@ -67,7 +82,7 @@ async function _getCalendar() {
  * @param {string}  [opts.calendarId]    - overrides the default calendar
  * @param {string}  [opts.employeeName]  - shown in event title
  */
-async function createAppointment({ service, startTime, endTime, customerName, bookingCode, calendarId, employeeName, employeeColor }) {
+async function createAppointment({ service, startTime, endTime, customerName, bookingCode, calendarId, employeeName, employeeColor, houseCall }) {
   const timezone   = process.env.TIMEZONE || 'America/Paramaribo';
   const currency   = process.env.CURRENCY || 'SRD';
   const targetCal  = calendarId || DEFAULT_CALENDAR_ID;
@@ -75,11 +90,12 @@ async function createAppointment({ service, startTime, endTime, customerName, bo
   try {
     const cal = await _getCalendar();
 
-    const titleParts = [`💈 ${service.name}`, customerName];
+    const dot = employeeName ? `${hexToCircleEmoji(employeeColor)} ` : '';
+    const titleParts = [`💈 ${houseCall ? '🏠 ' : ''}${service.name}`, customerName];
     if (employeeName) titleParts.splice(1, 0, `(${employeeName})`);
 
     const event = {
-      summary: titleParts.join(' — '),
+      summary: dot + titleParts.join(' — '),
       description: [
         `📋 Service : ${service.name}`,
         employeeName ? `✂️  Barber  : ${employeeName}` : '',
@@ -87,9 +103,12 @@ async function createAppointment({ service, startTime, endTime, customerName, bo
         `🎫 Code    : ${bookingCode}`,
         `💰 Price   : ${currency} ${service.price}`,
         `⏱️  Duration: ${service.duration} min`,
+        houseCall ? `🏠 House call: ${houseCall.distanceKm} km — ${mapsLinkFor(houseCall.lat, houseCall.lng)}` : '',
+        houseCall?.address ? `📍 ${houseCall.address}` : '',
         '',
         '📅 Booked via WhatsApp Bot',
       ].filter(Boolean).join('\n'),
+      ...(houseCall ? { location: houseCall.address || `${houseCall.lat},${houseCall.lng}` } : {}),
       start: { dateTime: startTime.toISOString(), timeZone: timezone },
       end:   { dateTime: endTime.toISOString(),   timeZone: timezone },
       colorId: hexToCalColorId(employeeColor),
@@ -166,16 +185,17 @@ async function cancelEvent({ calendarId, eventId }) {
 /**
  * Update (patch) an existing Google Calendar event (used when rescheduling).
  */
-async function updateEvent({ calendarId, eventId, startTime, endTime, service, customerName, bookingCode, employeeName, employeeColor }) {
+async function updateEvent({ calendarId, eventId, startTime, endTime, service, customerName, bookingCode, employeeName, employeeColor, statusLabel }) {
   if (!calendarId || !eventId) return { success: false, error: 'Missing calendarId or eventId' };
   const timezone = process.env.TIMEZONE || 'America/Paramaribo';
   const currency = process.env.CURRENCY || 'SRD';
   try {
     const cal = await _getCalendar();
+    const dot = employeeName ? `${hexToCircleEmoji(employeeColor)} ` : '';
     const titleParts = [`💈 ${service.name}`, customerName];
     if (employeeName) titleParts.splice(1, 0, `(${employeeName})`);
     const patch = {
-      summary: titleParts.join(' — '),
+      summary: (statusLabel ? statusLabel + ' ' : '') + dot + titleParts.join(' — '),
       description: [
         `📋 Service : ${service.name}`,
         employeeName ? `✂️  Barber  : ${employeeName}` : '',
@@ -184,7 +204,7 @@ async function updateEvent({ calendarId, eventId, startTime, endTime, service, c
         `💰 Price   : ${currency} ${service.price}`,
         `⏱️  Duration: ${service.duration} min`,
         '',
-        '🔄 Rescheduled via WhatsApp Bot',
+        statusLabel ? '🔄 Status updated via Kassa/Dashboard' : '🔄 Rescheduled via WhatsApp Bot',
       ].filter(Boolean).join('\n'),
       start: { dateTime: new Date(startTime).toISOString(), timeZone: timezone },
       end:   { dateTime: new Date(endTime).toISOString(),   timeZone: timezone },
@@ -243,4 +263,52 @@ async function listEvents(calendarId, dateStr) {
   }
 }
 
-module.exports = { createAppointment, cancelEvent, updateEvent, listEvents, createLeaveEvent, GCAL_COLORS };
+/**
+ * Share the main shop calendar with a barber's Gmail address.
+ * Sends them a Google notification email automatically.
+ * Requires the service account to have "Make changes and manage sharing" on the shop calendar.
+ */
+async function shareCalendarWithBarber(barberEmail) {
+  const shopCalId = process.env.GOOGLE_CALENDAR_ID;
+  if (!shopCalId || !barberEmail) return { success: false, error: 'Missing calendar ID or barber email' };
+  try {
+    const cal = await _getCalendar();
+    await cal.acl.insert({
+      calendarId:        shopCalId,
+      sendNotifications: true,
+      resource: {
+        role:  'reader',
+        scope: { type: 'user', value: barberEmail },
+      },
+    });
+    console.log(`✅ Shop calendar shared with ${barberEmail}`);
+    return { success: true };
+  } catch (err) {
+    // 'already exists' is fine — barber already has access
+    if (err.message?.includes('Already Exists') || err.code === 409) {
+      console.log(`ℹ️  Calendar already shared with ${barberEmail}`);
+      return { success: true };
+    }
+    console.error(`❌ Failed to share calendar with ${barberEmail}:`, err.message);
+    return { success: false, error: err.message };
+  }
+}
+
+/**
+ * Revoke a barber's access to the main shop calendar.
+ */
+async function revokeCalendarShare(barberEmail) {
+  const shopCalId = process.env.GOOGLE_CALENDAR_ID;
+  if (!shopCalId || !barberEmail) return { success: false };
+  try {
+    const cal = await _getCalendar();
+    await cal.acl.delete({ calendarId: shopCalId, ruleId: `user:${barberEmail}` });
+    console.log(`🗑️  Calendar access revoked for ${barberEmail}`);
+    return { success: true };
+  } catch (err) {
+    console.error(`⚠️  Failed to revoke calendar for ${barberEmail}:`, err.message);
+    return { success: false, error: err.message };
+  }
+}
+
+module.exports = { createAppointment, cancelEvent, updateEvent, listEvents, createLeaveEvent, shareCalendarWithBarber, revokeCalendarShare, GCAL_COLORS };

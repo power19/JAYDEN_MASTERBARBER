@@ -59,21 +59,29 @@
 </div>
 
 <!-- ── Main App ───────────────────────────────────────────────────────────── -->
-<div x-show="authenticated" class="flex h-screen overflow-hidden">
+<div x-show="authenticated" x-data="{ sidebarOpen: false }" class="flex h-screen overflow-hidden">
 
-  <!-- Sidebar -->
-  <aside class="w-64 bg-slate-900 flex flex-col flex-shrink-0 overflow-y-auto">
+  <!-- Backdrop (mobile/tablet only, shown while sidebar drawer is open) -->
+  <div x-show="sidebarOpen" x-cloak x-transition.opacity @click="sidebarOpen = false"
+       class="fixed inset-0 bg-black/50 z-30 lg:hidden"></div>
+
+  <!-- Sidebar: off-canvas drawer below lg, static column at lg+ -->
+  <aside class="fixed inset-y-0 left-0 z-40 w-64 bg-slate-900 flex flex-col flex-shrink-0 overflow-y-auto transform transition-transform duration-200 ease-in-out lg:static lg:translate-x-0"
+         :class="sidebarOpen ? 'translate-x-0' : '-translate-x-full'">
     <div class="p-5 border-b border-white/10">
       <div class="flex items-center gap-3">
         <span class="text-3xl">💈</span>
-        <div>
+        <div class="flex-1 min-w-0">
           <div class="text-white font-bold text-sm leading-tight" x-text="shopName || 'Barbershop'"></div>
           <div class="text-slate-400 text-xs">Admin Dashboard</div>
         </div>
+        <button @click="sidebarOpen = false" class="lg:hidden text-white/60 hover:text-white p-1">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
       </div>
     </div>
 
-    <nav class="flex-1 p-3 space-y-1">
+    <nav class="flex-1 p-3 space-y-1" @click="sidebarOpen = false">
       <button @click="nav('dashboard')"   :class="page==='dashboard'   ? 'active' : ''" class="sidebar-link w-full text-left">📊 Dashboard</button>
       <button @click="nav('appointments')" :class="page==='appointments' ? 'active' : ''" class="sidebar-link w-full text-left">📅 Appointments</button>
       <button @click="nav('employees')"   :class="page==='employees'   ? 'active' : ''" class="sidebar-link w-full text-left">👥 Employees</button>
@@ -82,8 +90,10 @@
       <button @click="nav('blocks')"      :class="page==='blocks'      ? 'active' : ''" class="sidebar-link w-full text-left">🚫 Closed Dates</button>
       <button @click="nav('services')"    :class="page==='services'    ? 'active' : ''" class="sidebar-link w-full text-left">✂️ Services</button>
       <button @click="nav('gallery')"      :class="page==='gallery'      ? 'active' : ''" class="sidebar-link w-full text-left">📸 Gallery</button>
+      <button @click="nav('training')"    :class="page==='training'    ? 'active' : ''" class="sidebar-link w-full text-left">🎓 Training</button>
+      <button @click="nav('menu')"        :class="page==='menu'        ? 'active' : ''" class="sidebar-link w-full text-left">📋 Menu Order</button>
       <button @click="nav('customers')"   :class="page==='customers'   ? 'active' : ''" class="sidebar-link w-full text-left">👤 Customers</button>
-      <button @click="nav('pricing')"     :class="page==='pricing'     ? 'active' : ''" class="sidebar-link w-full text-left">💰 Pricing</button>
+      <button @click="nav('keywords')"    :class="page==='keywords'    ? 'active' : ''" class="sidebar-link w-full text-left">🔑 Keywords</button>
       <button @click="nav('messages')"    :class="page==='messages'    ? 'active' : ''" class="sidebar-link w-full text-left">✉️ Bot Messages</button>
       <button @click="nav('settings')"    :class="page==='settings'    ? 'active' : ''" class="sidebar-link w-full text-left">⚙️ Settings</button>
     </nav>
@@ -109,10 +119,18 @@
   </aside>
 
   <!-- Main content -->
-  <main class="flex-1 overflow-y-auto">
+  <main class="flex-1 overflow-y-auto min-w-0">
+
+    <!-- Mobile/tablet top bar (hidden at lg+, where the sidebar is always visible) -->
+    <div class="lg:hidden sticky top-0 z-20 bg-slate-900 text-white flex items-center gap-3 px-4 py-3">
+      <button @click="sidebarOpen = true" class="p-1 -ml-1">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
+      </button>
+      <span class="font-bold text-sm" x-text="shopName || 'Barbershop'"></span>
+    </div>
 
     <!-- ── DASHBOARD ─────────────────────────────────────────────── -->
-    <div x-show="page === 'dashboard'" class="p-8">
+    <div x-show="page === 'dashboard'" class="p-4 lg:p-8">
       <h2 class="text-2xl font-bold text-slate-800 mb-6">Dashboard</h2>
 
       <!-- Stats -->
@@ -188,7 +206,7 @@
 
             <div x-show="waStatus.status === 'disconnected'">
               <p class="text-slate-600 text-sm mb-2">The WhatsApp connection was lost.</p>
-              <p class="text-xs text-slate-400 mb-4">If reconnecting repeatedly fails, delete <code class="bg-slate-100 px-1 rounded">.wwebjs_auth/</code> and reconnect to re-scan.</p>
+              <p class="text-xs text-slate-400 mb-4">If reconnecting repeatedly fails, use "Change Number" below to wipe the session and re-scan a fresh QR.</p>
               <button @click="reconnectBot()" class="btn-primary text-xs">🔄 Reconnect Bot</button>
             </div>
 
@@ -199,6 +217,7 @@
           </div>
 
         </div>
+
       </div>
 
       <!-- Today's schedule -->
@@ -210,13 +229,19 @@
         <div x-show="todayAppointments.length === 0" class="text-slate-400 text-center py-8">No appointments today</div>
         <div class="space-y-3">
           <template x-for="a in todayAppointments" :key="a.id">
-            <div class="flex items-center gap-4 p-3 rounded-xl hover:bg-slate-50 border border-slate-100">
-              <div class="text-sm font-mono font-bold text-slate-600 w-20 flex-shrink-0" x-text="fmtTime(a.start_time)"></div>
-              <div class="w-3 h-3 rounded-full flex-shrink-0" :style="`background:${a.employee_color||'#94a3b8'}`"></div>
-              <div class="flex-1 min-w-0">
-                <div class="font-semibold text-slate-800 text-sm flex items-center gap-2">
+            <div class="flex flex-wrap items-center gap-3 sm:gap-4 p-3 rounded-xl hover:bg-slate-50 border border-slate-100">
+              <div class="flex items-center gap-3 flex-shrink-0">
+                <div class="text-sm font-mono font-bold text-slate-600 w-16 sm:w-20 flex-shrink-0" x-text="fmtTime(a.start_time)"></div>
+                <div class="w-3 h-3 rounded-full flex-shrink-0" :style="`background:${a.employee_color||'#94a3b8'}`"></div>
+              </div>
+              <div class="w-full sm:w-auto sm:flex-1 min-w-0 order-3 sm:order-none">
+                <div class="font-semibold text-slate-800 text-sm flex items-center gap-2 flex-wrap">
                   <span x-text="a.customer_name"></span>
                   <span class="text-xs font-mono text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded" x-text="'#' + (a.booking_code || '?')"></span>
+                  <a x-show="a.is_house_call" :href="`https://maps.google.com/?q=${a.house_call_lat},${a.house_call_lng}`" target="_blank"
+                     class="text-xs font-semibold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded" title="View house call location">
+                    🏠 <span x-text="a.house_call_distance_km + ' km'"></span>
+                  </a>
                 </div>
                 <div class="text-slate-500 text-xs" x-text="`${a.service_emoji} ${a.service_name} · ${a.employee_name || 'Unassigned'}`"></div>
                 <div x-show="a.customer_phone" class="text-slate-400 text-xs mt-0.5" x-text="'📱 ' + (a.customer_phone || '').replace(/@\S+$/, '')"></div>
@@ -224,7 +249,7 @@
               <div>
                 <span class="badge" :class="statusBadge(a.status)" x-text="a.status"></span>
               </div>
-              <div class="flex gap-2">
+              <div class="flex gap-2 ml-auto sm:ml-0">
                 <button @click="markStatus(a.id, 'completed')" title="Mark completed" class="text-emerald-500 hover:text-emerald-600 text-lg">✅</button>
                 <button @click="markStatus(a.id, 'no-show')"   title="Mark no-show"   class="text-orange-400 hover:text-orange-500 text-lg">👻</button>
               </div>
@@ -253,10 +278,18 @@
     </div>
 
     <!-- ── APPOINTMENTS ──────────────────────────────────────────── -->
-    <div x-show="page === 'appointments'" class="p-8">
+    <div x-show="page === 'appointments'" class="p-4 lg:p-8">
       <div class="flex justify-between items-center mb-6">
         <h2 class="text-2xl font-bold text-slate-800">Appointments</h2>
-        <button @click="openNewApptModal()" class="btn-primary">+ New Appointment</button>
+        <div class="flex items-center gap-2">
+          <button @click="syncAllCalendar()"
+                  :disabled="calSyncing"
+                  class="btn-secondary text-sm flex items-center gap-1"
+                  title="Re-sync all upcoming appointments to the currently configured Google Calendar">
+            <span x-text="calSyncing ? '⏳ Syncing…' : '📅 Sync to Calendar'"></span>
+          </button>
+          <button @click="openNewApptModal()" class="btn-primary">+ New Appointment</button>
+        </div>
       </div>
 
       <!-- Filters -->
@@ -343,7 +376,13 @@
                     <div class="text-slate-400 text-xs font-mono tracking-widest" x-text="'#' + (a.booking_code || '—')"></div>
                     <div x-show="a.customer_phone" class="text-slate-400 text-xs mt-0.5" x-text="'📱 ' + (a.customer_phone || '').replace(/@\S+$/, '')"></div>
                   </td>
-                  <td class="py-3" x-text="`${a.service_emoji} ${a.service_name}`"></td>
+                  <td class="py-3">
+                    <div x-text="`${a.service_emoji} ${a.service_name}`"></div>
+                    <a x-show="a.is_house_call" :href="`https://maps.google.com/?q=${a.house_call_lat},${a.house_call_lng}`" target="_blank"
+                       class="inline-block text-xs font-semibold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded mt-0.5" title="View house call location">
+                      🏠 <span x-text="a.house_call_distance_km + ' km'"></span>
+                    </a>
+                  </td>
                   <td class="py-3">
                     <div class="flex items-center gap-2">
                       <div class="w-2.5 h-2.5 rounded-full" :style="`background:${a.employee_color||'#94a3b8'}`"></div>
@@ -629,7 +668,7 @@
     </template>
 
     <!-- ── EMPLOYEES ─────────────────────────────────────────────── -->
-    <div x-show="page === 'employees'" class="p-8">
+    <div x-show="page === 'employees'" class="p-4 lg:p-8">
       <div class="flex justify-between items-center mb-6">
         <h2 class="text-2xl font-bold text-slate-800">Employees</h2>
         <button @click="openEmployeeModal()" class="btn-primary">+ Add Barber</button>
@@ -674,6 +713,10 @@
                           class="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">
                       🚫 Away Today
                     </span>
+                    <span x-show="settings.house_call_enabled === '1' && e.does_house_calls"
+                          class="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">
+                      🏠 House Calls
+                    </span>
                   </div>
                 </td>
                 <td class="px-6 py-4">
@@ -690,6 +733,7 @@
                             :class="e.is_active ? 'btn-danger' : 'btn-primary'"
                             class="text-xs py-1 px-3 rounded-xl font-semibold transition"
                             x-text="e.is_active ? 'Deactivate' : 'Activate'"></button>
+                    <button @click="deleteEmployee(e)" class="btn-secondary text-xs py-1 px-3 text-red-500">🗑️ Delete</button>
                   </div>
                 </td>
               </tr>
@@ -780,7 +824,7 @@
     </template>
 
     <!-- ── WORK HOURS ─────────────────────────────────────────────── -->
-    <div x-show="page === 'hours'" class="p-8">
+    <div x-show="page === 'hours'" class="p-4 lg:p-8">
       <div class="mb-6">
         <h2 class="text-2xl font-bold text-slate-800">Work Hours</h2>
         <!-- Active label -->
@@ -822,22 +866,24 @@
 
         <div x-show="!hoursLoading" class="space-y-3">
           <template x-for="(h, idx) in weeklyHours" :key="h.day_of_week">
-            <div class="flex items-center gap-4 p-3 rounded-xl hover:bg-slate-50">
-              <div class="w-28 text-sm font-medium text-slate-700"
-                   x-text="['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][h.day_of_week]"></div>
-              <!-- Toggle -->
-              <button @click="h.is_open = h.is_open ? 0 : 1"
-                :class="h.is_open ? 'bg-amber-500' : 'bg-slate-300'"
-                class="relative inline-flex h-6 w-11 rounded-full transition-colors flex-shrink-0">
-                <span :class="h.is_open ? 'translate-x-6' : 'translate-x-1'"
-                  class="inline-block h-4 w-4 rounded-full bg-white shadow mt-1 transition-transform"></span>
-              </button>
-              <span class="text-xs text-slate-500 w-12" x-text="h.is_open ? 'Open' : 'Closed'"></span>
+            <div class="flex flex-wrap items-center gap-3 sm:gap-4 p-3 rounded-xl hover:bg-slate-50">
+              <div class="flex items-center gap-3">
+                <div class="w-24 sm:w-28 text-sm font-medium text-slate-700"
+                     x-text="['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][h.day_of_week]"></div>
+                <!-- Toggle -->
+                <button @click="h.is_open = h.is_open ? 0 : 1"
+                  :class="h.is_open ? 'bg-amber-500' : 'bg-slate-300'"
+                  class="relative inline-flex h-6 w-11 rounded-full transition-colors flex-shrink-0">
+                  <span :class="h.is_open ? 'translate-x-6' : 'translate-x-1'"
+                    class="inline-block h-4 w-4 rounded-full bg-white shadow mt-1 transition-transform"></span>
+                </button>
+                <span class="text-xs text-slate-500 w-12" x-text="h.is_open ? 'Open' : 'Closed'"></span>
+              </div>
               <template x-if="h.is_open">
                 <div class="flex items-center gap-2">
-                  <input type="time" x-model="h.open_time"  class="input w-32 text-sm">
+                  <input type="time" x-model="h.open_time"  class="input w-28 sm:w-32 text-sm">
                   <span class="text-slate-400">–</span>
-                  <input type="time" x-model="h.close_time" class="input w-32 text-sm">
+                  <input type="time" x-model="h.close_time" class="input w-28 sm:w-32 text-sm">
                 </div>
               </template>
             </div>
@@ -851,7 +897,7 @@
     </div>
 
     <!-- ── SERVICES ──────────────────────────────────────────────── -->
-    <div x-show="page === 'services'" class="p-8">
+    <div x-show="page === 'services'" class="p-4 lg:p-8">
       <div class="flex justify-between items-center mb-6">
         <h2 class="text-2xl font-bold text-slate-800">Services</h2>
         <button @click="openServiceModal()" class="btn-primary">+ Add Service</button>
@@ -860,15 +906,15 @@
         <div x-show="services.length === 0" class="text-center text-slate-400 py-8">No services yet</div>
         <div class="space-y-3">
           <template x-for="s in services" :key="s.id">
-            <div class="flex items-center gap-4 p-3 rounded-xl hover:bg-slate-50 border border-slate-100">
+            <div class="flex flex-wrap items-center gap-3 sm:gap-4 p-3 rounded-xl hover:bg-slate-50 border border-slate-100">
               <span class="text-2xl" x-text="s.emoji || '✂️'"></span>
-              <div class="flex-1">
-                <div class="flex items-center gap-2">
+              <div class="flex-1 min-w-[10rem]">
+                <div class="flex items-center gap-2 flex-wrap">
                   <span class="font-semibold text-slate-800" x-text="s.name"></span>
                   <span class="badge" :class="s.is_active ? 'badge-green' : 'badge-gray'"
                         x-text="s.is_active ? 'Active' : 'Hidden'"></span>
                 </div>
-                <div class="text-slate-500 text-xs" x-text="s.description"></div>
+                <div class="text-slate-500 text-xs whitespace-pre-line" x-text="s.description"></div>
               </div>
               <div class="text-right flex-shrink-0">
                 <div class="font-bold text-slate-800" x-text="`${settings.currency} ${s.price}`"></div>
@@ -886,7 +932,7 @@
     </div>
 
     <!-- ── EMPLOYEE LEAVE ─────────────────────────────────────────── -->
-    <div x-show="page === 'leave'" class="p-8">
+    <div x-show="page === 'leave'" class="p-4 lg:p-8">
       <h2 class="text-2xl font-bold text-slate-800 mb-6">🏖️ Employee Leave</h2>
 
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -999,7 +1045,7 @@
     </div>
 
     <!-- ── CLOSED DATES ───────────────────────────────────────────── -->
-    <div x-show="page === 'blocks'" class="p-8">
+    <div x-show="page === 'blocks'" class="p-4 lg:p-8">
       <h2 class="text-2xl font-bold text-slate-800 mb-6">🚫 Closed Dates & Time-Off</h2>
 
       <!-- Surinamese Public Holidays -->
@@ -1133,7 +1179,7 @@
     </div>
 
     <!-- ── GALLERY ───────────────────────────────────────────────── -->
-    <div x-show="page === 'gallery'" class="p-8">
+    <div x-show="page === 'gallery'" class="p-4 lg:p-8">
       <div class="flex justify-between items-center mb-6">
         <h2 class="text-2xl font-bold text-slate-800">📸 Gallery</h2>
         <!-- Upload button -->
@@ -1215,8 +1261,150 @@
       </template>
     </div>
 
+    <!-- ── MENU ORDER ───────────────────────────────────────────── -->
+    <div x-show="page === 'menu'" class="p-4 lg:p-8">
+      <div class="flex justify-between items-center mb-2">
+        <h2 class="text-2xl font-bold text-slate-800">📋 Menu Order</h2>
+        <button @click="saveMenuOrder()" class="btn-primary">💾 Save</button>
+      </div>
+      <p class="text-sm text-slate-400 mb-6">Drag items up or down to change the order customers see them. Toggle the switch to show or hide an option entirely.</p>
+
+      <div class="max-w-lg space-y-2">
+        <template x-for="(item, idx) in menuItems" :key="item.action">
+          <div class="card flex items-center gap-4 py-3"
+               :class="item.enabled ? '' : 'opacity-50'">
+            <!-- Up / Down -->
+            <div class="flex flex-col gap-0.5 flex-shrink-0">
+              <button @click="menuMove(idx, -1)" :disabled="idx === 0"
+                      class="text-slate-400 hover:text-slate-700 disabled:opacity-20 text-xs leading-none px-1">▲</button>
+              <button @click="menuMove(idx, 1)" :disabled="idx === menuItems.length - 1"
+                      class="text-slate-400 hover:text-slate-700 disabled:opacity-20 text-xs leading-none px-1">▼</button>
+            </div>
+            <!-- Position badge -->
+            <span class="w-6 h-6 rounded-full bg-amber-100 text-amber-700 text-xs font-bold flex items-center justify-center flex-shrink-0"
+                  x-text="item.enabled ? (menuItems.slice(0,idx+1).filter(m=>m.enabled).length) : '—'"></span>
+            <!-- Icon + label -->
+            <span class="text-lg flex-shrink-0" x-text="menuIcons[item.action]"></span>
+            <div class="flex-1 min-w-0">
+              <!-- View mode -->
+              <template x-if="menuEditIdx !== idx">
+                <div class="flex items-center gap-2">
+                  <span class="font-medium text-slate-700 text-sm truncate"
+                        x-text="(item.labels && item.labels[menuEditLang]) || menuLabels[item.action]"></span>
+                  <button @click="menuEditIdx = idx; if(!item.labels) item.labels = {}"
+                          class="text-slate-400 hover:text-amber-500 flex-shrink-0 text-xs px-1" title="Rename">✏️</button>
+                </div>
+              </template>
+              <!-- Edit mode — one input per language -->
+              <template x-if="menuEditIdx === idx">
+                <div class="space-y-1.5">
+                  <div class="flex gap-1 mb-1">
+                    <template x-for="lng in menuLangs" :key="lng.code">
+                      <button @click="menuEditLang = lng.code"
+                              :class="menuEditLang === lng.code ? 'bg-amber-500 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'"
+                              class="text-xs px-2 py-0.5 rounded font-medium" x-text="lng.flag + ' ' + lng.code.toUpperCase()"></button>
+                    </template>
+                  </div>
+                  <template x-for="lng in menuLangs" :key="lng.code">
+                    <div x-show="menuEditLang === lng.code">
+                      <input type="text"
+                             :value="item.labels && item.labels[lng.code] || ''"
+                             @input="if(!item.labels) item.labels = {}; item.labels[lng.code] = $event.target.value"
+                             :placeholder="menuLabels[item.action] + ' (' + lng.name + ' — blank = auto-translate)'"
+                             @keydown.escape="menuEditIdx = null"
+                             class="w-full text-xs border border-amber-400 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-amber-300" />
+                    </div>
+                  </template>
+                  <button @click="menuEditIdx = null" class="text-xs text-amber-600 font-medium hover:underline">✅ Done</button>
+                </div>
+              </template>
+            </div>
+            <!-- Enable toggle -->
+            <button @click="item.enabled = !item.enabled"
+                    :class="item.enabled ? 'bg-amber-500' : 'bg-slate-200'"
+                    class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none flex-shrink-0">
+              <span :class="item.enabled ? 'translate-x-6' : 'translate-x-1'"
+                    class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform shadow"></span>
+            </button>
+          </div>
+        </template>
+      </div>
+
+      <div class="mt-6 flex items-center gap-3">
+        <button @click="saveMenuOrder()" class="btn-primary">💾 Save Order</button>
+        <span x-show="menuSaved" class="text-emerald-500 text-sm">✅ Saved!</span>
+      </div>
+    </div>
+
+    <!-- ── TRAINING ──────────────────────────────────────────────── -->
+    <div x-show="page === 'training'" class="p-4 lg:p-8">
+      <div class="flex justify-between items-center mb-6">
+        <h2 class="text-2xl font-bold text-slate-800">🎓 Training</h2>
+        <div class="flex items-center gap-3">
+          <!-- Enable toggle -->
+          <span class="text-sm text-slate-500" x-text="settings.training_enabled === '1' ? 'Visible in menu' : 'Hidden from menu'"></span>
+          <button @click="settings.training_enabled = settings.training_enabled === '1' ? '0' : '1'; saveSettings()"
+            :class="settings.training_enabled === '1' ? 'bg-amber-500' : 'bg-slate-200'"
+            class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none flex-shrink-0">
+            <span :class="settings.training_enabled === '1' ? 'translate-x-6' : 'translate-x-1'"
+              class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform shadow"></span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Upload new video/picture -->
+      <div class="card mb-6">
+        <h3 class="font-bold text-slate-700 mb-1">Add Training Video or Picture</h3>
+        <p class="text-xs text-slate-400 mb-4">Each item can have its own caption. Items are sent in order when a customer selects Training.</p>
+        <div class="space-y-3">
+          <div>
+            <label class="label">File <span class="font-normal text-slate-400">(MP4, MOV, JPG, PNG or WEBP)</span></label>
+            <label class="btn-secondary cursor-pointer inline-flex items-center gap-2">
+              🎬 Choose File
+              <input type="file" accept="video/*,image/*" class="hidden" @change="trainingUploadFile = $event.target.files[0]; trainingUploadName = $event.target.files[0]?.name || ''">
+            </label>
+            <span class="text-xs text-slate-500 ml-2" x-text="trainingUploadName || 'No file chosen'"></span>
+          </div>
+          <div>
+            <label class="label">Caption <span class="font-normal text-slate-400">(shown under the item in WhatsApp)</span></label>
+            <textarea x-model="trainingUploadCaption" class="input text-sm" rows="3" placeholder="e.g. 📋 Module 1 — Fade technique. Watch carefully and practice these steps…"></textarea>
+          </div>
+          <button @click="uploadTrainingVideo()" :disabled="!trainingUploadFile"
+            class="btn-primary disabled:opacity-50 disabled:cursor-not-allowed">
+            ⬆️ Upload
+          </button>
+        </div>
+      </div>
+
+      <!-- Item list -->
+      <div class="space-y-4">
+        <div x-show="trainingVideos.length === 0" class="card text-center text-slate-400 py-10">
+          <p class="text-3xl mb-2">🎬</p>
+          <p class="text-sm">No training items yet. Upload one above.</p>
+        </div>
+        <template x-for="(v, idx) in trainingVideos" :key="v.id">
+          <div class="card">
+            <div class="flex items-start gap-4">
+              <div class="flex-shrink-0 w-10 h-10 rounded-xl flex items-center justify-center text-xl" style="background:#f1f5f9" x-text="/\.(jpe?g|png|webp)$/i.test(v.originalName) ? '🖼️' : '🎬'"></div>
+              <div class="flex-1 min-w-0">
+                <p class="text-xs text-slate-400 font-mono truncate mb-2" x-text="(idx + 1) + '. ' + v.originalName"></p>
+                <textarea
+                  x-model="v.caption"
+                  @change="saveTrainingCaption(v)"
+                  class="input text-sm"
+                  rows="3"
+                  placeholder="Caption shown under this video in WhatsApp…"></textarea>
+                <p class="text-xs text-slate-400 mt-1">Caption saves automatically when you click outside.</p>
+              </div>
+              <button @click="deleteTrainingVideoById(v.id)" class="btn-danger text-xs flex-shrink-0">🗑️ Remove</button>
+            </div>
+          </div>
+        </template>
+      </div>
+    </div>
+
     <!-- ── CUSTOMERS ─────────────────────────────────────────────── -->
-    <div x-show="page === 'customers'" class="p-8">
+    <div x-show="page === 'customers'" class="p-4 lg:p-8">
       <div class="flex justify-between items-center mb-6">
         <h2 class="text-2xl font-bold text-slate-800">👤 Customers</h2>
         <div class="flex gap-2">
@@ -1237,11 +1425,27 @@
 
             <!-- Header row -->
             <div class="flex items-start justify-between gap-4">
-              <div class="flex items-center gap-3">
+              <div class="flex items-center gap-3 flex-1 min-w-0">
                 <div class="w-10 h-10 rounded-full bg-slate-200 flex items-center justify-center font-bold text-slate-600 flex-shrink-0"
                      x-text="(c.name || '?')[0].toUpperCase()"></div>
-                <div>
-                  <div class="font-semibold text-slate-800" x-text="c.name || '(unnamed)'"></div>
+                <div class="flex-1 min-w-0">
+                  <!-- Inline name edit -->
+                  <template x-if="editingCustomerName && editingCustomerName.id === c.id">
+                    <div class="flex items-center gap-2">
+                      <input x-model="editingCustomerName.value" @keydown.enter="saveCustomerName(c)"
+                             @keydown.escape="editingCustomerName = null"
+                             class="input text-sm py-0.5 font-semibold" style="max-width:180px">
+                      <button @click="saveCustomerName(c)" class="text-emerald-600 text-xs font-semibold">✓ Save</button>
+                      <button @click="editingCustomerName = null" class="text-slate-400 text-xs">✕</button>
+                    </div>
+                  </template>
+                  <template x-if="!editingCustomerName || editingCustomerName.id !== c.id">
+                    <div class="flex items-center gap-2">
+                      <span class="font-semibold text-slate-800" x-text="c.name || '(unnamed)'"></span>
+                      <button @click="editingCustomerName = { id: c.id, value: c.name || '' }"
+                              class="text-slate-400 hover:text-slate-600 text-xs" title="Edit name">✏️</button>
+                    </div>
+                  </template>
                   <div class="flex items-center gap-2 mt-0.5 flex-wrap">
                     <span x-show="c.is_blocked" class="text-xs font-bold text-red-600">🚫 BLOCKED</span>
                     <span x-show="c.block_reason && c.is_blocked" class="text-xs text-red-400 italic" x-text="'— ' + c.block_reason"></span>
@@ -1250,20 +1454,29 @@
                 </div>
               </div>
 
-              <!-- Stats -->
-              <div class="flex items-center gap-4 text-xs text-slate-500 flex-shrink-0">
-                <div class="text-center">
+              <!-- Clickable stats -->
+              <div class="flex items-center gap-3 text-xs text-slate-500 flex-shrink-0">
+                <button @click="openCustomerStats(c, 'bookings')"
+                        class="text-center hover:bg-slate-100 rounded-lg px-2 py-1 transition"
+                        :class="c.total_bookings > 0 ? 'cursor-pointer' : 'cursor-default'">
                   <div class="font-bold text-slate-700 text-base" x-text="c.total_bookings"></div>
                   <div>bookings</div>
-                </div>
-                <div class="text-center">
+                </button>
+                <button @click="openCustomerStats(c, 'noshows')"
+                        class="text-center hover:bg-amber-50 rounded-lg px-2 py-1 transition"
+                        :class="c.no_show_count > 0 ? 'cursor-pointer' : 'cursor-default'">
                   <div class="font-bold text-amber-600 text-base" x-text="c.no_show_count"></div>
                   <div>no-shows</div>
-                </div>
-                <div class="text-center">
+                </button>
+                <button @click="openCustomerStats(c, 'ratings')"
+                        class="text-center hover:bg-emerald-50 rounded-lg px-2 py-1 transition"
+                        :class="c.avg_rating ? 'cursor-pointer' : 'cursor-default'">
                   <div class="font-bold text-emerald-600 text-base" x-text="c.avg_rating ? '⭐ ' + c.avg_rating : '—'"></div>
                   <div>avg rating</div>
-                </div>
+                </button>
+                <!-- Delete -->
+                <button @click="deleteCustomer(c.id)"
+                        class="text-slate-300 hover:text-red-500 transition ml-1" title="Delete customer">🗑️</button>
               </div>
             </div>
 
@@ -1280,7 +1493,6 @@
                   </div>
                 </template>
               </div>
-              <!-- Link new number -->
               <div class="flex items-center gap-2 mt-2">
                 <input type="text"
                        :value="addPhoneInputs[c.id] || ''"
@@ -1321,49 +1533,106 @@
       </div>
     </div>
 
-    <!-- ── PRICING ──────────────────────────────────────────────── -->
-    <div x-show="page === 'pricing'" class="p-8">
-      <div class="flex justify-between items-center mb-2">
-        <h2 class="text-2xl font-bold text-slate-800">💰 Special Pricing</h2>
-        <button @click="openPriceModal()" class="btn-primary text-sm">+ Add Special Price</button>
-      </div>
-      <p class="text-slate-400 text-sm mb-6">Give a specific customer a different price for a specific service — it overrides the standard price whenever they book that service via WhatsApp.</p>
-
-      <div x-show="customerPrices.length === 0" class="card text-center text-slate-400 py-12">
-        No special prices set yet.
-      </div>
-
-      <div class="card p-0 overflow-hidden" x-show="customerPrices.length > 0">
-        <table class="w-full text-sm">
-          <thead class="bg-slate-50 text-slate-500 text-xs uppercase">
-            <tr>
-              <th class="text-left px-4 py-2">Customer</th>
-              <th class="text-left px-4 py-2">Service</th>
-              <th class="text-right px-4 py-2">Standard</th>
-              <th class="text-right px-4 py-2">Special</th>
-              <th class="px-4 py-2"></th>
-            </tr>
-          </thead>
-          <tbody>
-            <template x-for="row in customerPrices" :key="row.id">
-              <tr class="border-t border-slate-100">
-                <td class="px-4 py-2 font-medium text-slate-700" x-text="row.customer_name"></td>
-                <td class="px-4 py-2 text-slate-600" x-text="row.service_name"></td>
-                <td class="px-4 py-2 text-right text-slate-400" x-text="settings.currency + ' ' + row.standard_price"></td>
-                <td class="px-4 py-2 text-right font-semibold text-emerald-600" x-text="settings.currency + ' ' + row.price"></td>
-                <td class="px-4 py-2 text-right whitespace-nowrap">
-                  <button @click="openPriceModal(row)" class="text-slate-400 hover:text-slate-600 mr-2" title="Edit">✏️</button>
-                  <button @click="deleteCustomerPrice(row.id)" class="text-slate-400 hover:text-red-500" title="Remove">🗑️</button>
-                </td>
-              </tr>
+    <!-- ── CUSTOMER STATS MODAL ─────────────────────────────────── -->
+    <template x-if="customerStatsModal">
+      <div class="fixed inset-0 z-50 flex items-center justify-center p-4" style="background:rgba(0,0,0,0.5)">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col">
+          <!-- Header -->
+          <div class="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+            <div>
+              <h3 class="font-bold text-slate-800" x-text="customerStatsModal.title"></h3>
+              <p class="text-xs text-slate-400 mt-0.5" x-text="customerStatsModal.customer.name"></p>
+            </div>
+            <button @click="customerStatsModal = null" class="text-slate-400 hover:text-slate-600 text-2xl leading-none">&times;</button>
+          </div>
+          <!-- List -->
+          <div class="overflow-y-auto flex-1 px-6 py-4 space-y-3">
+            <div x-show="customerStatsModal.loading" class="text-center text-slate-400 py-8 text-sm">Loading…</div>
+            <div x-show="!customerStatsModal.loading && customerStatsModal.items.length === 0"
+                 class="text-center text-slate-400 py-8 text-sm">No records found.</div>
+            <template x-for="a in customerStatsModal.items" :key="a.id">
+              <div class="border border-slate-100 rounded-xl px-4 py-3">
+                <div class="flex items-center justify-between gap-3">
+                  <div>
+                    <div class="text-sm font-semibold text-slate-700" x-text="a.service_name"></div>
+                    <div class="text-xs text-slate-400 mt-0.5"
+                         x-text="new Date(a.start_time).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric',timeZone:'America/Paramaribo'}) + ' · ' + (a.employee_name || 'Unassigned')"></div>
+                  </div>
+                  <div class="flex items-center gap-2 flex-shrink-0">
+                    <span x-show="a.rating" class="text-xs text-emerald-600 font-semibold" x-text="'⭐ ' + a.rating"></span>
+                    <span class="text-xs px-2 py-0.5 rounded-full font-medium"
+                          :class="{
+                            'bg-emerald-100 text-emerald-700': a.status==='completed',
+                            'bg-red-100 text-red-700': a.status==='no-show' || a.status==='cancelled',
+                            'bg-blue-100 text-blue-700': a.status==='confirmed',
+                            'bg-slate-100 text-slate-600': !['completed','no-show','cancelled','confirmed'].includes(a.status)
+                          }"
+                          x-text="a.status"></span>
+                  </div>
+                </div>
+              </div>
             </template>
-          </tbody>
-        </table>
+          </div>
+        </div>
       </div>
+    </template>
+
+    <!-- ── KEYWORDS ─────────────────────────────────────────────── -->
+    <div x-show="page === 'keywords'" class="p-4 lg:p-8">
+      <div class="flex justify-between items-center mb-2">
+        <h2 class="text-2xl font-bold text-slate-800">🔑 Keywords</h2>
+      </div>
+      <p class="text-sm text-slate-400 mb-6">When a customer types one of these words the bot jumps straight to that section — from any state, in any language. Keywords are case-insensitive.</p>
+
+      <!-- Add new keyword -->
+      <div class="card mb-6">
+        <h3 class="font-bold text-slate-700 mb-3">Add Keyword</h3>
+        <div class="flex gap-3 flex-wrap">
+          <input x-model="newKeyword.keyword" class="input text-sm flex-1" style="min-width:140px"
+                 placeholder="e.g. fade, boek, afspraak"
+                 @keydown.enter="addKeyword()">
+          <select x-model="newKeyword.action" class="input text-sm" style="min-width:160px">
+            <option value="booking">📅 Booking</option>
+            <option value="gallery">📸 Gallery / Styles</option>
+            <option value="training">🎓 Training</option>
+            <option value="hours">🕐 Opening Hours</option>
+            <option value="location">📍 Location</option>
+            <option value="contact">📞 Contact</option>
+            <option value="manage">🔧 Manage Booking</option>
+          </select>
+          <button @click="addKeyword()" class="btn-primary text-sm px-5">+ Add</button>
+        </div>
+      </div>
+
+      <!-- Keywords grouped by action -->
+      <template x-for="group in keywordGroups()" :key="group.action">
+        <div class="card mb-4">
+          <div class="flex items-center gap-2 mb-3">
+            <span class="text-base" x-text="group.icon"></span>
+            <h3 class="font-bold text-slate-700 text-sm" x-text="group.label"></h3>
+            <span class="text-xs text-slate-400" x-text="'(' + group.items.length + ')'"></span>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <template x-for="k in group.items" :key="k.id">
+              <div class="flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-sm border transition"
+                   :class="k.enabled ? 'bg-amber-50 border-amber-200 text-amber-800' : 'bg-slate-100 border-slate-200 text-slate-400 line-through'">
+                <span x-text="k.keyword"></span>
+                <button @click="toggleKeyword(k)" :title="k.enabled ? 'Disable' : 'Enable'"
+                        class="text-xs opacity-60 hover:opacity-100 ml-0.5">
+                  <span x-text="k.enabled ? '⏸' : '▶'"></span>
+                </button>
+                <button @click="deleteKeyword(k.id)" title="Delete"
+                        class="text-xs opacity-60 hover:opacity-100 hover:text-red-500">✕</button>
+              </div>
+            </template>
+            <span x-show="group.items.length === 0" class="text-xs text-slate-400 italic py-1">No keywords yet.</span>
+          </div>
+        </div>
+      </template>
     </div>
 
     <!-- ── BOT MESSAGES ──────────────────────────────────────────── -->
-    <div x-show="page === 'messages'" class="p-8">
+    <div x-show="page === 'messages'" class="p-4 lg:p-8">
       <div class="flex justify-between items-center mb-6">
         <h2 class="text-2xl font-bold text-slate-800">Bot Messages</h2>
         <button @click="saveMessages()" class="btn-primary">💾 Save All</button>
@@ -1386,7 +1655,7 @@
     </div>
 
     <!-- ── SETTINGS ──────────────────────────────────────────────── -->
-    <div x-show="page === 'settings'" class="p-8">
+    <div x-show="page === 'settings'" class="p-4 lg:p-8">
       <div class="flex justify-between items-center mb-6">
         <h2 class="text-2xl font-bold text-slate-800">Settings</h2>
         <div class="flex items-center gap-3">
@@ -1399,9 +1668,11 @@
       <div class="flex gap-1 mb-6 bg-slate-100 p-1 rounded-xl w-fit flex-wrap">
         <button @click="settingsTab='shop'"         :class="settingsTab==='shop'         ? 'bg-white shadow text-slate-800 font-semibold' : 'text-slate-500 hover:text-slate-700'" class="px-4 py-2 rounded-lg text-sm transition">🏪 Shop</button>
         <button @click="settingsTab='booking'"      :class="settingsTab==='booking'      ? 'bg-white shadow text-slate-800 font-semibold' : 'text-slate-500 hover:text-slate-700'" class="px-4 py-2 rounded-lg text-sm transition">📅 Booking</button>
+        <button @click="settingsTab='housecalls'"   :class="settingsTab==='housecalls'   ? 'bg-white shadow text-slate-800 font-semibold' : 'text-slate-500 hover:text-slate-700'" class="px-4 py-2 rounded-lg text-sm transition">🏠 House Calls</button>
         <button @click="settingsTab='notifications'":class="settingsTab==='notifications'? 'bg-white shadow text-slate-800 font-semibold' : 'text-slate-500 hover:text-slate-700'" class="px-4 py-2 rounded-lg text-sm transition">🔔 Notifications</button>
         <button @click="settingsTab='rules'"        :class="settingsTab==='rules'        ? 'bg-white shadow text-slate-800 font-semibold' : 'text-slate-500 hover:text-slate-700'" class="px-4 py-2 rounded-lg text-sm transition">⚠️ Rules</button>
         <button @click="settingsTab='integrations'" :class="settingsTab==='integrations' ? 'bg-white shadow text-slate-800 font-semibold' : 'text-slate-500 hover:text-slate-700'" class="px-4 py-2 rounded-lg text-sm transition">🔗 Integrations</button>
+        <button @click="settingsTab='security'"     :class="settingsTab==='security'     ? 'bg-white shadow text-slate-800 font-semibold' : 'text-slate-500 hover:text-slate-700'" class="px-4 py-2 rounded-lg text-sm transition">🔒 Security</button>
       </div>
 
       <!-- ── TAB: Shop ───────────────────────────────────────────────── -->
@@ -1417,9 +1688,13 @@
             <input x-model="settings.shop_address" class="input" placeholder="Paramaribo, Suriname">
           </div>
           <div>
-            <label class="label">Phone / WhatsApp</label>
+            <label class="label">WhatsApp Number</label>
             <input x-model="settings.shop_phone" class="input" placeholder="+597 XXX-XXXX">
             <p class="text-xs text-slate-400 mt-1">Shown to customers when the bot is paused or unavailable.</p>
+          </div>
+          <div>
+            <label class="label">Telefoon (Vaste lijn)</label>
+            <input x-model="settings.shop_landline" class="input" placeholder="+597 XXX-XXXX">
           </div>
           <div>
             <label class="label">Management / Finance Contact</label>
@@ -1433,6 +1708,14 @@
           <div>
             <label class="label">Instagram</label>
             <input x-model="settings.shop_instagram" class="input" placeholder="@jaydensbarbershop">
+          </div>
+          <div>
+            <label class="label">Facebook</label>
+            <input x-model="settings.shop_facebook" class="input" placeholder="https://facebook.com/jaydensbarbershop">
+          </div>
+          <div>
+            <label class="label">TikTok</label>
+            <input x-model="settings.shop_tiktok" class="input" placeholder="@jaydensbarbershop">
           </div>
           <div>
             <label class="label">Google Maps Link</label>
@@ -1461,6 +1744,14 @@
             </select>
           </div>
         </div>
+        <div class="card space-y-4">
+          <h3 class="font-bold text-slate-700">🌐 Language Selection Menu</h3>
+          <div>
+            <label class="label">Prompt</label>
+            <input x-model="settings.lang_menu_prompt" class="input" placeholder="🌐 *Kies uw taal:*">
+            <p class="text-xs text-slate-400 mt-1">Shown to every new customer when picking a language. Leave blank to use the default.</p>
+          </div>
+        </div>
       </div>
 
       <!-- ── TAB: Booking ────────────────────────────────────────────── -->
@@ -1484,6 +1775,11 @@
               Show <strong>"Any Available Barber"</strong> option in booking flow
             </label>
           </div>
+          <div>
+            <label class="label">Max People per Group Booking</label>
+            <input type="number" x-model="settings.max_group_size" class="input w-24" min="1" max="10" placeholder="3">
+            <p class="text-xs text-slate-400 mt-1">Customers can never book for more people than there are active barbers, and never more than this number either way — e.g. with 2 active barbers, the group option stops at 2 people regardless of this setting.</p>
+          </div>
         </div>
 
         <!-- New Customer Policy -->
@@ -1498,6 +1794,150 @@
                 <option :value="String(e.id)" x-text="e.name"></option>
               </template>
             </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── TAB: House Calls ─────────────────────────────────────────── -->
+      <div x-show="settingsTab==='housecalls'" class="max-w-xl space-y-6">
+        <div class="card space-y-5">
+          <div class="flex items-center gap-3">
+            <input type="checkbox" id="chk-house-call-enabled"
+              :checked="settings.house_call_enabled === '1'"
+              @change="settings.house_call_enabled = $event.target.checked ? '1' : '0'"
+              class="w-4 h-4 accent-amber-500">
+            <label for="chk-house-call-enabled" class="text-sm text-slate-700 cursor-pointer font-semibold">
+              🏠 Enable house calls
+            </label>
+          </div>
+          <p class="text-xs text-slate-400">Customers can request a home visit; the bot asks them to share their WhatsApp location and calculates a fee and extra time from it. Requires at least one barber marked "Does house calls" on the Employees page.</p>
+
+          <div x-show="settings.house_call_enabled === '1'" class="space-y-5 pt-2 border-t border-slate-100">
+            <div>
+              <label class="label">Shop Coordinates</label>
+              <div class="flex gap-2">
+                <input type="text" x-model="settings.shop_latitude"  class="input" placeholder="Latitude, e.g. 5.8520">
+                <input type="text" x-model="settings.shop_longitude" class="input" placeholder="Longitude, e.g. -55.2038">
+              </div>
+              <p class="text-xs text-slate-400 mt-1">Find these by right-clicking your shop's location on Google Maps and copying the coordinates shown at the top of the menu.</p>
+            </div>
+
+            <div>
+              <label class="label">Max House Call Distance (km)</label>
+              <input type="number" x-model="settings.house_call_max_km" class="input w-28" min="1">
+              <p class="text-xs text-slate-400 mt-1">Beyond this distance, house calls aren't offered.</p>
+            </div>
+
+            <div>
+              <label class="label">Pricing Model</label>
+              <div class="flex gap-4 mt-1">
+                <label class="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                  <input type="radio" value="formula" x-model="settings.house_call_pricing_mode" class="accent-amber-500"> Base fee + rate per km
+                </label>
+                <label class="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                  <input type="radio" value="tiers" x-model="settings.house_call_pricing_mode" class="accent-amber-500"> Flat distance tiers
+                </label>
+              </div>
+            </div>
+
+            <!-- Formula mode fields -->
+            <div x-show="settings.house_call_pricing_mode === 'formula'" class="grid grid-cols-3 gap-3">
+              <div>
+                <label class="label">Included in base fee (km)</label>
+                <input type="number" x-model="settings.house_call_free_km" class="input" min="0">
+              </div>
+              <div>
+                <label class="label">Base fee</label>
+                <input type="number" x-model="settings.house_call_base_fee" class="input" min="0">
+                <p class="text-xs text-slate-400 mt-1">Charged for any house call, covering the included distance above.</p>
+              </div>
+              <div>
+                <label class="label">Per extra km</label>
+                <input type="number" x-model="settings.house_call_per_km_fee" class="input" min="0">
+              </div>
+            </div>
+
+            <!-- Tiers mode editor -->
+            <div x-show="settings.house_call_pricing_mode === 'tiers'" x-data="{
+                   get tiers() { try { return JSON.parse(settings.house_call_tiers || '[]') } catch(e) { return [] } },
+                   set tiers(v) { settings.house_call_tiers = JSON.stringify(v) },
+                 }">
+              <label class="label">Distance Tiers</label>
+              <div class="space-y-2">
+                <template x-for="(tier, idx) in tiers" :key="idx">
+                  <div class="flex items-center gap-2">
+                    <span class="text-xs text-slate-500">Up to</span>
+                    <input type="number" min="0" class="input w-20" :value="tier.upTo"
+                      @input="const t=[...tiers]; t[idx]={...t[idx], upTo: +$event.target.value}; tiers = t">
+                    <span class="text-xs text-slate-500">km →</span>
+                    <input type="number" min="0" class="input w-24" :value="tier.fee"
+                      @input="const t=[...tiers]; t[idx]={...t[idx], fee: +$event.target.value}; tiers = t">
+                    <span class="text-xs text-slate-500">fee</span>
+                    <button @click="tiers = tiers.filter((_, i) => i !== idx)" class="text-red-400 hover:text-red-600 text-xs font-semibold ml-auto">✕</button>
+                  </div>
+                </template>
+              </div>
+              <button @click="tiers = [...tiers, { upTo: (tiers[tiers.length-1]?.upTo || 0) + 5, fee: 0 }]" class="btn-secondary text-xs py-1 px-3 mt-2">+ Add Tier</button>
+              <p class="text-xs text-slate-400 mt-1">Distance is matched against the first tier whose "up to" is greater or equal — keep them in ascending order.</p>
+            </div>
+
+            <div class="pt-2 border-t border-slate-100">
+              <label class="label">Visit Duration (min)</label>
+              <input type="number" x-model="settings.house_call_visit_minutes" class="input w-28" min="0">
+              <p class="text-xs text-slate-400 mt-1">Fixed on-site cutting time — house calls are their own booking, not a choice of service, so this is the same for every house call.</p>
+            </div>
+
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="label">Travel Setup Time (min)</label>
+                <input type="number" x-model="settings.house_call_travel_buffer_minutes" class="input" min="0">
+                <p class="text-xs text-slate-400 mt-1">Flat time always added, regardless of distance.</p>
+              </div>
+              <div>
+                <label class="label">Travel Time per km (min)</label>
+                <input type="number" x-model="settings.house_call_travel_minutes_per_km" class="input" min="0">
+                <p class="text-xs text-slate-400 mt-1">One-way estimate — doubled automatically for the drive back to the shop.</p>
+              </div>
+            </div>
+
+            <div class="pt-2 border-t border-slate-100">
+              <label class="label">Availability</label>
+              <p class="text-xs text-slate-400 mb-3">When house calls can be booked — independent of barbers' in-shop hours (e.g. evenings, or days the shop itself is closed).</p>
+              <div class="space-y-2" x-data="{
+                     get hcHours() {
+                       try {
+                         const h = JSON.parse(settings.house_call_hours || '[]');
+                         return Array.from({length:7}, (_,d) => h.find(r=>r.day_of_week===d) || { day_of_week:d, is_open:0, open_time:'09:00', close_time:'18:00' });
+                       } catch(e) { return Array.from({length:7}, (_,d) => ({ day_of_week:d, is_open:0, open_time:'09:00', close_time:'18:00' })); }
+                     },
+                     set hcHours(v) { settings.house_call_hours = JSON.stringify(v); },
+                   }">
+                <template x-for="(h, idx) in hcHours" :key="h.day_of_week">
+                  <div class="flex flex-wrap items-center gap-3 p-2 rounded-xl hover:bg-slate-50">
+                    <div class="w-20 sm:w-24 text-sm font-medium text-slate-700"
+                         x-text="['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][h.day_of_week]"></div>
+                    <button @click="const arr=[...hcHours]; arr[idx]={...arr[idx], is_open: arr[idx].is_open ? 0 : 1}; hcHours=arr;"
+                      :class="h.is_open ? 'bg-amber-500' : 'bg-slate-300'"
+                      class="relative inline-flex h-6 w-11 rounded-full transition-colors flex-shrink-0">
+                      <span :class="h.is_open ? 'translate-x-6' : 'translate-x-1'"
+                        class="inline-block h-4 w-4 rounded-full bg-white shadow mt-1 transition-transform"></span>
+                    </button>
+                    <span class="text-xs text-slate-500 w-12" x-text="h.is_open ? 'Open' : 'Closed'"></span>
+                    <template x-if="h.is_open">
+                      <div class="flex items-center gap-2">
+                        <input type="time" :value="h.open_time"
+                          @change="const arr=[...hcHours]; arr[idx]={...arr[idx], open_time: $event.target.value}; hcHours=arr;"
+                          class="input w-28 sm:w-32 text-sm">
+                        <span class="text-slate-400">–</span>
+                        <input type="time" :value="h.close_time"
+                          @change="const arr=[...hcHours]; arr[idx]={...arr[idx], close_time: $event.target.value}; hcHours=arr;"
+                          class="input w-28 sm:w-32 text-sm">
+                      </div>
+                    </template>
+                  </div>
+                </template>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -1543,7 +1983,7 @@
         <!-- CS Numbers -->
         <div class="card space-y-4">
           <h3 class="font-bold text-slate-700">📲 Customer Service Numbers</h3>
-          <p class="text-xs text-slate-400">These numbers receive WhatsApp notifications for: new bookings, cancellations, ratings, and first-time customers. Up to 2 numbers.</p>
+          <p class="text-xs text-slate-400">These numbers receive WhatsApp notifications for: new bookings, cancellations, ratings, and first-time customers. Suggestions are also forwarded here. Up to 2 numbers.</p>
           <div>
             <label class="label">CS Number 1</label>
             <input x-model="settings.cs_phone_1" class="input" placeholder="+597 XXX-XXXX">
@@ -1551,6 +1991,26 @@
           <div>
             <label class="label">CS Number 2 <span class="text-slate-400 font-normal">(optional)</span></label>
             <input x-model="settings.cs_phone_2" class="input" placeholder="+597 XXX-XXXX">
+          </div>
+        </div>
+
+        <!-- Fixed Customer Limit -->
+        <div class="card space-y-4">
+          <h3 class="font-bold text-slate-700">📱 Vaste Klanten</h3>
+          <p class="text-xs text-slate-400">Maximum aantal vaste klanten per kapper.</p>
+          <div>
+            <label class="label">Max vaste klanten per kapper</label>
+            <input x-model="settings.fixed_customer_limit" type="number" min="1" max="100" class="input w-32" placeholder="10">
+          </div>
+        </div>
+
+        <!-- Complaints & Suggestions -->
+        <div class="card space-y-4">
+          <h3 class="font-bold text-slate-700">💬 Klachten & Suggesties</h3>
+          <p class="text-xs text-slate-400">Klanten die een klacht indienen via de bot worden doorverwezen naar dit nummer.</p>
+          <div>
+            <label class="label">Klachten Nummer</label>
+            <input x-model="settings.complaint_phone" class="input" placeholder="+597 XXX-XXXX">
           </div>
         </div>
 
@@ -1572,6 +2032,22 @@
             <label class="label">Send survey after (minutes)</label>
             <input type="number" x-model="settings.survey_delay_minutes" class="input w-32" min="5" max="1440" placeholder="30">
             <p class="text-xs text-slate-400 mt-1">Minutes after appointment ends before the survey is sent.</p>
+          </div>
+        </div>
+
+        <!-- Calendar Invite (.ics) -->
+        <div class="card space-y-4">
+          <div class="flex items-center justify-between">
+            <div>
+              <h3 class="font-bold text-slate-700">📆 Calendar Invite (.ics)</h3>
+              <p class="text-xs text-slate-400 mt-0.5">Attach an .ics calendar file to booking confirmations so customers can add the appointment to their calendar.</p>
+            </div>
+            <button @click="settings.ics_enabled = settings.ics_enabled === '0' ? '1' : '0'"
+              :class="settings.ics_enabled !== '0' ? 'bg-amber-500' : 'bg-slate-300'"
+              class="relative inline-flex h-6 w-11 rounded-full transition-colors flex-shrink-0">
+              <span :class="settings.ics_enabled !== '0' ? 'translate-x-6' : 'translate-x-1'"
+                class="inline-block h-4 w-4 rounded-full bg-white shadow mt-1 transition-transform"></span>
+            </button>
           </div>
         </div>
 
@@ -1634,6 +2110,32 @@
           </div>
         </div>
 
+        <!-- Cancellation Window -->
+        <div class="card space-y-4">
+          <div class="flex items-center justify-between">
+            <div>
+              <h3 class="font-bold text-slate-700">❌ Cancellation Window</h3>
+              <p class="text-xs text-slate-400 mt-0.5">When enabled, customers cannot cancel via WhatsApp within X minutes of their appointment. They must contact you directly instead.</p>
+            </div>
+            <button @click="settings.cancel_window_enabled = settings.cancel_window_enabled === '1' ? '0' : '1'"
+              :class="settings.cancel_window_enabled === '1' ? 'bg-amber-500' : 'bg-slate-300'"
+              class="relative inline-flex h-6 w-11 rounded-full transition-colors flex-shrink-0">
+              <span :class="settings.cancel_window_enabled === '1' ? 'translate-x-6' : 'translate-x-1'"
+                class="inline-block h-4 w-4 rounded-full bg-white shadow mt-1 transition-transform"></span>
+            </button>
+          </div>
+          <div x-show="settings.cancel_window_enabled === '1'" class="space-y-2">
+            <label class="label">Block cancellations within</label>
+            <div class="flex items-center gap-3">
+              <input type="number" x-model="settings.cancel_window_minutes" class="input w-24" min="30" max="10080" placeholder="120">
+              <span class="text-sm text-slate-500">minutes of the appointment</span>
+            </div>
+            <p class="text-xs text-slate-400"
+               x-text="'E.g. ' + settings.cancel_window_minutes + ' min = customers cannot cancel within ' + (settings.cancel_window_minutes >= 60 ? Math.floor(settings.cancel_window_minutes/60) + 'h ' + (settings.cancel_window_minutes%60 > 0 ? settings.cancel_window_minutes%60 + 'm ' : '') : settings.cancel_window_minutes + ' min ') + 'of their appointment.'">
+            </p>
+          </div>
+        </div>
+
         <!-- Barber Scan PIN -->
         <div class="card space-y-4">
           <h3 class="font-bold text-slate-700">🔐 Barber Scanner PIN</h3>
@@ -1645,6 +2147,16 @@
           </div>
           <div class="bg-blue-50 border border-blue-200 rounded-xl p-3 text-xs text-blue-700">
             📱 Barber URL: <span class="font-mono font-semibold" x-text="(settings.shop_url || window.location.origin) + '/scan'"></span>
+          </div>
+        </div>
+
+        <!-- Session Timeout -->
+        <div class="card space-y-4">
+          <h3 class="font-bold text-slate-700">⏱️ Session Timeout</h3>
+          <p class="text-xs text-slate-400">How long before an inactive conversation resets and the customer has to start over.</p>
+          <div class="flex items-center gap-3">
+            <input x-model="settings.session_timeout_minutes" type="number" min="1" max="1440" class="input w-24">
+            <span class="text-sm text-slate-500">minuten</span>
           </div>
         </div>
 
@@ -1721,7 +2233,38 @@
         </div>
       </div>
 
-      <div class="mt-8 flex gap-3 items-center">
+      <!-- ── TAB: Security ──────────────────────────────────────────── -->
+      <div x-show="settingsTab==='security'" class="max-w-md">
+        <div class="card space-y-4">
+          <h3 class="font-bold text-slate-700">🔒 Change Dashboard Password</h3>
+          <div>
+            <label class="label">Current Password</label>
+            <input type="password" x-model="pwForm.current" class="input" placeholder="••••••••" autocomplete="current-password">
+          </div>
+          <div>
+            <label class="label">New Password</label>
+            <input type="password" x-model="pwForm.newPw" class="input" placeholder="••••••••" autocomplete="new-password">
+          </div>
+          <div>
+            <label class="label">Confirm New Password</label>
+            <input type="password" x-model="pwForm.confirm" class="input" placeholder="••••••••" autocomplete="new-password"
+                   @keydown.enter="changePassword()">
+          </div>
+          <p x-show="pwForm.error" class="text-red-500 text-sm" x-text="pwForm.error"></p>
+          <button @click="changePassword()" class="btn-primary w-full">🔒 Change Password</button>
+        </div>
+
+        <!-- WhatsApp Number -->
+        <div class="card mt-6">
+          <h3 class="text-base font-semibold text-slate-800 mb-1">📱 WhatsApp Number</h3>
+          <p class="text-sm text-slate-500 mb-4">Use this when switching the bot to a different WhatsApp number. It wipes the saved session and immediately shows a fresh QR code to scan.</p>
+          <button @click="resetWaSession()" class="btn-secondary" style="border-color:#f59e0b;color:#b45309;">
+            🔁 Change WhatsApp Number
+          </button>
+        </div>
+      </div>
+
+      <div class="mt-8 flex gap-3 items-center" x-show="settingsTab !== 'security'">
         <button @click="saveSettings()" class="btn-primary">💾 Save Settings</button>
         <span x-show="settingsSaved" class="text-emerald-500 text-sm font-medium">✅ Saved!</span>
       </div>
@@ -1734,15 +2277,24 @@
 <template x-if="showEmployeeModal">
   <div class="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"
        @click.self="showEmployeeModal=false">
-    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6"
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto"
          x-transition:enter="transition ease-out duration-200"
          x-transition:enter-start="opacity-0 scale-95"
          x-transition:enter-end="opacity-100 scale-100">
-      <div class="flex items-center justify-between mb-5">
+      <div class="flex items-center justify-between mb-4">
         <h3 class="text-lg font-bold text-slate-800" x-text="editingEmployee ? 'Edit Barber' : 'Add Barber'"></h3>
         <button @click="showEmployeeModal=false" class="text-slate-400 hover:text-slate-600 text-xl leading-none">&times;</button>
       </div>
-      <div class="space-y-4">
+
+      <!-- Tabs -->
+      <div class="flex gap-1 mb-5 bg-slate-100 p-1 rounded-xl">
+        <button @click="employeeTab='general'"   :class="employeeTab==='general'   ? 'bg-white shadow text-slate-800 font-semibold' : 'text-slate-500 hover:text-slate-700'" class="flex-1 py-1.5 rounded-lg text-sm transition">👤 General</button>
+        <button @click="employeeTab='services'"  :class="employeeTab==='services'  ? 'bg-white shadow text-slate-800 font-semibold' : 'text-slate-500 hover:text-slate-700'" class="flex-1 py-1.5 rounded-lg text-sm transition">✂️ Services</button>
+        <button @click="employeeTab='customers'" :class="employeeTab==='customers' ? 'bg-white shadow text-slate-800 font-semibold' : 'text-slate-500 hover:text-slate-700'" class="flex-1 py-1.5 rounded-lg text-sm transition">📱 Fixed Customers</button>
+      </div>
+
+      <!-- Tab: General -->
+      <div x-show="employeeTab==='general'" class="space-y-4">
         <div>
           <label class="label">Full Name *</label>
           <input x-model="employeeForm.name" class="input" placeholder="Jayden" required>
@@ -1755,14 +2307,17 @@
           <label class="label">Color <span class="normal-case font-normal text-slate-400">— matches Google Calendar</span></label>
           <div class="flex gap-2 flex-wrap mt-1">
             <template x-for="c in gcalColors" :key="c.hex">
-              <button type="button" @click="employeeForm.color = c.hex"
-                :title="c.name"
-                class="w-8 h-8 rounded-full border-2 transition"
-                :class="employeeForm.color === c.hex ? 'border-slate-800 scale-110' : 'border-transparent'"
-                :style="`background:${c.hex}`"></button>
+              <button type="button" @click="!colorTakenBy(c.hex) && (employeeForm.color = c.hex)"
+                :title="colorTakenBy(c.hex) ? `${c.name} — already used by ${colorTakenBy(c.hex)}` : c.name"
+                class="w-8 h-8 rounded-full border-2 transition relative"
+                :class="[employeeForm.color === c.hex ? 'border-slate-800 scale-110' : 'border-transparent', colorTakenBy(c.hex) ? 'opacity-30 cursor-not-allowed' : '']"
+                :style="`background:${c.hex}`">
+                <span x-show="colorTakenBy(c.hex)" class="absolute inset-0 flex items-center justify-center text-white text-xs">✕</span>
+              </button>
             </template>
           </div>
-          <p class="text-xs text-slate-400 mt-1" x-text="gcalColors.find(c => c.hex === employeeForm.color)?.name || ''"></p>
+          <p class="text-xs text-slate-400 mt-1" x-text="colorTakenBy(employeeForm.color) ? `⚠️ Already used by ${colorTakenBy(employeeForm.color)}` : (gcalColors.find(c => c.hex === employeeForm.color)?.name || '')"
+             :class="colorTakenBy(employeeForm.color) ? 'text-amber-600 font-medium' : ''"></p>
         </div>
         <div>
           <label class="label">Google Calendar ID <span class="normal-case font-normal">(optional)</span></label>
@@ -1770,99 +2325,116 @@
             placeholder="example@gmail.com or calendar ID">
           <p class="text-xs text-slate-400 mt-1">Events for this barber will sync to this calendar.</p>
         </div>
-        <div>
-          <label class="label">Scanner PIN <span class="normal-case font-normal text-slate-400">— for the /scan check-in page</span></label>
-          <input type="text" x-model="employeeForm.scan_pin" class="input w-32 font-mono text-center tracking-widest" placeholder="e.g. 5678" maxlength="8">
-          <p class="text-xs text-slate-400 mt-1">Each barber uses their own PIN to unlock the QR scanner. Leave empty to disable scanner access for this barber.</p>
+        <div x-show="settings.house_call_enabled === '1'" class="flex items-center gap-3">
+          <input type="checkbox" id="chk-house-calls"
+            :checked="employeeForm.does_house_calls"
+            @change="employeeForm.does_house_calls = $event.target.checked"
+            class="w-4 h-4 accent-amber-500">
+          <label for="chk-house-calls" class="text-sm text-slate-700 cursor-pointer">
+            🏠 Does <strong>house calls</strong>
+          </label>
         </div>
         <div>
-          <label class="label">Services <span class="normal-case font-normal text-slate-400">— uncheck what this barber cannot do</span></label>
-          <div class="mt-2 space-y-2 max-h-48 overflow-y-auto pr-1">
-            <template x-for="s in services.filter(s=>s.is_active)" :key="s.id">
-              <label class="flex items-center gap-3 p-2 rounded-lg hover:bg-slate-50 cursor-pointer">
-                <input type="checkbox"
-                  :checked="!employeeForm.excluded_service_ids.includes(s.id)"
-                  @change="employeeForm.excluded_service_ids.includes(s.id)
-                    ? employeeForm.excluded_service_ids = employeeForm.excluded_service_ids.filter(id=>id!==s.id)
-                    : employeeForm.excluded_service_ids = [...employeeForm.excluded_service_ids, s.id]"
-                  class="w-4 h-4 rounded accent-amber-500">
-                <span class="text-lg leading-none" x-text="s.emoji || '✂️'"></span>
-                <span class="text-sm text-slate-700 font-medium" x-text="s.name"></span>
-                <span class="text-xs text-slate-400 ml-auto" x-text="s.duration + ' min'"></span>
-              </label>
+          <label class="label">Fallback Barbers <span class="normal-case font-normal text-slate-400">(optional, in priority order)</span></label>
+          <p class="text-xs text-slate-400 mb-2">When this barber is unavailable, fixed customers are redirected down this list until one has availability.</p>
+          <!-- Priority list -->
+          <div class="space-y-1 mb-2 max-h-40 overflow-y-auto pr-1">
+            <template x-for="(fbId, idx) in employeeForm.fallbackEmployeeIds" :key="fbId">
+              <div class="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">
+                <span class="text-xs font-bold text-slate-400 w-5" x-text="(idx + 1) + '.'"></span>
+                <span class="text-sm text-slate-700 flex-1" x-text="employees.find(e => String(e.id) === String(fbId))?.name || '(unknown)'"></span>
+                <button x-show="idx > 0" @click="employeeForm.fallbackEmployeeIds.splice(idx-1, 2, employeeForm.fallbackEmployeeIds[idx], employeeForm.fallbackEmployeeIds[idx-1])" class="text-slate-400 hover:text-slate-600 text-xs px-1" title="Move up">▲</button>
+                <button x-show="idx < employeeForm.fallbackEmployeeIds.length - 1" @click="employeeForm.fallbackEmployeeIds.splice(idx, 2, employeeForm.fallbackEmployeeIds[idx+1], employeeForm.fallbackEmployeeIds[idx])" class="text-slate-400 hover:text-slate-600 text-xs px-1" title="Move down">▼</button>
+                <button @click="employeeForm.fallbackEmployeeIds = employeeForm.fallbackEmployeeIds.filter((_, i) => i !== idx)" class="text-red-400 hover:text-red-600 text-xs font-semibold">✕</button>
+              </div>
             </template>
+            <p x-show="employeeForm.fallbackEmployeeIds.length === 0" class="text-xs text-slate-400 italic py-1">No fallback barbers set.</p>
           </div>
-          <p class="text-xs text-slate-400 mt-2" x-show="employeeForm.excluded_service_ids.length === 0">
-            ⚡ Can perform <strong>all services</strong>
-          </p>
-          <p class="text-xs text-amber-600 mt-2" x-show="employeeForm.excluded_service_ids.length > 0"
-             x-text="`⚡ Cannot do ${employeeForm.excluded_service_ids.length} service(s) — can do ${services.filter(s=>s.is_active).length - employeeForm.excluded_service_ids.length} of ${services.filter(s=>s.is_active).length}`"></p>
+          <!-- Add fallback -->
+          <div x-show="employees.filter(e => e.is_active && String(e.id) !== String(editingEmployee?.id) && !employeeForm.fallbackEmployeeIds.includes(String(e.id))).length > 0" class="flex gap-2">
+            <select x-model="employeeForm.newFallbackId" class="input flex-1 text-sm">
+              <option value="">— Add fallback barber —</option>
+              <template x-for="e in employees.filter(e => e.is_active && String(e.id) !== String(editingEmployee?.id) && !employeeForm.fallbackEmployeeIds.includes(String(e.id)))" :key="e.id">
+                <option :value="String(e.id)" x-text="e.name"></option>
+              </template>
+            </select>
+            <button @click="if(employeeForm.newFallbackId){ employeeForm.fallbackEmployeeIds = [...employeeForm.fallbackEmployeeIds, employeeForm.newFallbackId]; employeeForm.newFallbackId=''; }" class="btn-secondary text-sm px-3">+ Add</button>
+          </div>
         </div>
       </div>
+
+      <!-- Tab: Services -->
+      <div x-show="employeeTab==='services'" class="space-y-3">
+        <p class="text-xs text-slate-400">Uncheck services this barber cannot perform. New services are enabled for everyone by default.</p>
+        <div class="space-y-2 max-h-64 overflow-y-auto pr-1">
+          <template x-for="s in services.filter(s=>s.is_active)" :key="s.id">
+            <label class="flex items-center gap-3 p-2 rounded-lg hover:bg-slate-50 cursor-pointer">
+              <input type="checkbox"
+                :checked="!employeeForm.excluded_service_ids.includes(s.id)"
+                @change="employeeForm.excluded_service_ids.includes(s.id)
+                  ? employeeForm.excluded_service_ids = employeeForm.excluded_service_ids.filter(id=>id!==s.id)
+                  : employeeForm.excluded_service_ids = [...employeeForm.excluded_service_ids, s.id]"
+                class="w-4 h-4 rounded accent-amber-500">
+              <span class="text-lg leading-none" x-text="s.emoji || '✂️'"></span>
+              <span class="text-sm text-slate-700 font-medium" x-text="s.name"></span>
+              <span class="text-xs text-slate-400 ml-auto" x-text="s.duration + ' min'"></span>
+            </label>
+          </template>
+        </div>
+        <p class="text-xs text-slate-400" x-show="employeeForm.excluded_service_ids.length === 0">⚡ Can perform <strong>all services</strong></p>
+        <p class="text-xs text-amber-600" x-show="employeeForm.excluded_service_ids.length > 0"
+           x-text="`⚡ Cannot do ${employeeForm.excluded_service_ids.length} service(s) — can do ${services.filter(s=>s.is_active).length - employeeForm.excluded_service_ids.length} of ${services.filter(s=>s.is_active).length}`"></p>
+      </div>
+
+      <!-- Tab: Fixed Customers -->
+      <div x-show="employeeTab==='customers'" class="space-y-3">
+        <p class="text-xs text-slate-400">When these customers message the bot, only this barber's availability will be shown. Pick from customers who have already chatted with the bot.</p>
+
+        <!-- Selected customers -->
+        <div class="space-y-1 max-h-56 overflow-y-auto pr-1">
+          <template x-for="cid in employeeForm.fixedCustomerIds" :key="cid">
+            <div class="flex items-center justify-between bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
+              <div>
+                <span class="text-sm font-medium text-slate-700" x-text="customers.find(c=>c.id===cid)?.name || '(unknown)'"></span>
+                <span class="text-xs text-slate-400 font-mono ml-1"
+                      x-text="customers.find(c=>c.id===cid)?.phones?.[0] ? '···' + String(customers.find(c=>c.id===cid).phones[0]).slice(-6) : ''"></span>
+              </div>
+              <button @click="employeeForm.fixedCustomerIds = employeeForm.fixedCustomerIds.filter(id => id !== cid)"
+                class="text-red-400 hover:text-red-600 text-xs font-semibold">✕ Remove</button>
+            </div>
+          </template>
+          <p x-show="employeeForm.fixedCustomerIds.length === 0" class="text-xs text-slate-400 italic py-1">No customers assigned yet.</p>
+        </div>
+
+        <!-- Search to add -->
+        <div x-show="employeeForm.fixedCustomerIds.length < (parseInt(settings.fixed_customer_limit) || 10)">
+          <label class="label">Add Customer</label>
+          <input x-model="fixedCustomerSearch" class="input text-sm" placeholder="Type a name to search…" autocomplete="off">
+          <div x-show="fixedCustomerSearch.length > 0" class="mt-1 border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+            <template x-for="c in customers.filter(c =>
+                c.name && c.name.toLowerCase().includes(fixedCustomerSearch.toLowerCase()) &&
+                !employeeForm.fixedCustomerIds.includes(c.id)
+              ).slice(0, 6)" :key="c.id">
+              <button @click="employeeForm.fixedCustomerIds = [...employeeForm.fixedCustomerIds, c.id]; fixedCustomerSearch = ''"
+                class="w-full text-left px-3 py-2 text-sm hover:bg-amber-50 border-b border-slate-100 last:border-0 flex items-center justify-between gap-3">
+                <span class="font-medium text-slate-700" x-text="c.name"></span>
+                <span class="text-xs text-slate-400 font-mono flex-shrink-0"
+                      x-text="(c.phones && c.phones[0]) ? '···' + String(c.phones[0]).slice(-6) : ''"></span>
+              </button>
+            </template>
+            <p x-show="customers.filter(c => c.name && c.name.toLowerCase().includes(fixedCustomerSearch.toLowerCase()) && !employeeForm.fixedCustomerIds.includes(c.id)).length === 0"
+               class="text-xs text-slate-400 px-3 py-2 italic">No matching customers found.</p>
+          </div>
+        </div>
+
+        <p class="text-xs text-slate-400" x-text="employeeForm.fixedCustomerIds.length + ' of ' + (parseInt(settings.fixed_customer_limit) || 10) + ' slots used'"></p>
+      </div>
+
       <div class="flex gap-3 mt-6">
         <button @click="saveEmployee()" class="btn-primary flex-1">
           <span x-text="editingEmployee ? 'Save Changes' : 'Add Barber'"></span>
         </button>
         <button @click="showEmployeeModal=false" class="btn-secondary flex-1">Cancel</button>
-      </div>
-    </div>
-  </div>
-</template>
-
-<!-- ── Special Price Modal ─────────────────────────────────────────────────── -->
-<template x-if="showPriceModal">
-  <div class="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"
-       @click.self="showPriceModal=false">
-    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6"
-         x-transition:enter="transition ease-out duration-200"
-         x-transition:enter-start="opacity-0 scale-95"
-         x-transition:enter-end="opacity-100 scale-100">
-      <div class="flex items-center justify-between mb-4">
-        <h3 class="text-lg font-bold text-slate-800" x-text="editingPriceId ? 'Edit Special Price' : 'Add Special Price'"></h3>
-        <button @click="showPriceModal=false" class="text-slate-400 hover:text-slate-600 text-xl leading-none">&times;</button>
-      </div>
-
-      <div class="space-y-4">
-        <div>
-          <label class="label">Customer</label>
-          <template x-if="!editingPriceId">
-            <div>
-              <input x-model="priceCustomerSearch" class="input text-sm" placeholder="Type a name to search…" autocomplete="off">
-              <div x-show="priceCustomerSearch.length > 0" class="mt-1 border border-slate-200 rounded-xl overflow-hidden shadow-sm max-h-40 overflow-y-auto">
-                <template x-for="c in customers.filter(c =>
-                    c.name && c.name.toLowerCase().includes(priceCustomerSearch.toLowerCase())
-                  ).slice(0, 6)" :key="c.id">
-                  <button @click="priceForm.customer_id = c.id; priceCustomerSearch = c.name"
-                    class="w-full text-left px-3 py-2 text-sm hover:bg-amber-50 border-b border-slate-100 last:border-0"
-                    x-text="c.name"></button>
-                </template>
-                <p x-show="customers.filter(c => c.name && c.name.toLowerCase().includes(priceCustomerSearch.toLowerCase())).length === 0"
-                   class="text-xs text-slate-400 px-3 py-2 italic">No matching customers found.</p>
-              </div>
-            </div>
-          </template>
-          <p x-show="editingPriceId" class="text-sm font-medium text-slate-700" x-text="priceCustomerSearch"></p>
-        </div>
-        <div>
-          <label class="label">Service</label>
-          <select x-model="priceForm.service_id" class="input" :disabled="!!editingPriceId"
-                  @change="if (!priceForm.price) priceForm.price = services.find(s => s.id === priceForm.service_id)?.price ?? ''">
-            <option value="">— Select —</option>
-            <template x-for="s in services.filter(s => s.is_active)" :key="s.id">
-              <option :value="s.id" x-text="s.name + ' (' + settings.currency + ' ' + s.price + ')'"></option>
-            </template>
-          </select>
-        </div>
-        <div>
-          <label class="label">Special Price (<span x-text="settings.currency"></span>)</label>
-          <input type="number" min="0" step="1" x-model="priceForm.price" class="input" placeholder="e.g. 20">
-        </div>
-        <p x-show="priceForm.error" class="text-red-500 text-sm" x-text="priceForm.error"></p>
-      </div>
-
-      <div class="flex gap-3 mt-6">
-        <button @click="saveCustomerPrice()" class="btn-primary flex-1">Save</button>
-        <button @click="showPriceModal=false" class="btn-secondary flex-1">Cancel</button>
       </div>
     </div>
   </div>
@@ -1893,7 +2465,7 @@
         </div>
         <div>
           <label class="label">Description</label>
-          <input x-model="serviceForm.description" class="input" placeholder="Short description shown to customers">
+          <textarea x-model="serviceForm.description" class="input" rows="4" placeholder="Short description shown to customers&#10;• Use bullet points&#10;• Add multiple lines"></textarea>
         </div>
         <div class="grid grid-cols-2 gap-4">
           <div>
@@ -1964,13 +2536,8 @@ function app() {
     customerFilter: 'all',  // 'all' | 'noshows' | 'blocked'
     addPhoneInputs: {},      // { customerId: phoneValue }
     blockReasonInputs: {},   // { customerId: reasonValue }
-
-    // Special pricing (per customer, per service)
-    customerPrices: [],
-    showPriceModal: false,
-    editingPriceId: null,
-    priceForm: { customer_id: '', service_id: '', price: '', error: '' },
-    priceCustomerSearch: '',
+    editingCustomerName: null,   // { id, value }
+    customerStatsModal: null,    // { customer, title, items, loading }
 
     // Human takeover — paused chats
     pausedChats: [],
@@ -1982,6 +2549,7 @@ function app() {
     gcalColors: [],
 
     // Google Calendar test state
+    calSyncing:         false,
     calendarTesting:    false,
     calendarTestResult: null,   // null | 'ok' | 'fail'
     calendarTestName:   '',
@@ -2001,6 +2569,35 @@ function app() {
 
     // Settings tabs
     settingsTab: 'shop',
+
+    // Employee modal tab
+    employeeTab: 'general',
+
+    fixedCustomerSearch: '',
+
+    // Menu order
+    menuItems: [],
+    menuSaved: false,
+    menuEditIdx: null,
+    menuEditLang: 'nl',
+    menuLangs: [
+      { code: 'en', name: 'English', flag: '🇬🇧' },
+      { code: 'nl', name: 'Dutch',   flag: '🇳🇱' },
+      { code: 'es', name: 'Spanish', flag: '🇪🇸' },
+      { code: 'fr', name: 'French',  flag: '🇫🇷' },
+    ],
+    menuIcons:  { booking:'📅', hours:'🕐', location:'📍', prices:'💰', contact:'📞', gallery:'📸', language:'🌐', manage:'📋', training:'🎓', feedback:'💬', privacy:'🔒' },
+    menuLabels: { booking:'Book an Appointment', hours:'Opening Hours', location:'Location', prices:'Service Prices', contact:'Contact Us', gallery:'Styles & Gallery', language:'Change Language', manage:'Manage My Booking', training:'Barber Training', feedback:'Complaints & Suggestions', privacy:'Privacy & Policy' },
+
+    // Keywords
+    keywords: [],
+    newKeyword: { keyword: '', action: 'booking' },
+
+    // Training
+    trainingVideos: [],
+    trainingUploadFile: null,
+    trainingUploadName: '',
+    trainingUploadCaption: '',
 
     // UI state
     botPaused: false,
@@ -2040,6 +2637,7 @@ function app() {
     hoursSaved: false,
     messagesSaved: false,
     settingsSaved: false,
+    pwForm: { current: '', newPw: '', confirm: '', error: '' },
     toast: '',
 
     get shopName() { return this.settings.shop_name || 'Barbershop Admin'; },
@@ -2077,6 +2675,15 @@ function app() {
       this.showToast('🔄 Reconnecting WhatsApp…');
       const res = await this.api('POST', '/api/whatsapp/reconnect');
       if (res.error) this.showToast('❌ ' + res.error);
+      await this.loadWhatsappStatus();
+    },
+
+    async resetWaSession() {
+      if (!confirm('⚠️ This will wipe the current WhatsApp session and show a fresh QR code.\n\nThe bot will be disconnected until you scan with the new (or same) number.\n\nContinue?')) return;
+      this.showToast('🔁 Clearing session…');
+      const res = await this.api('POST', '/api/whatsapp/reset-session');
+      if (res.error) { this.showToast('❌ ' + res.error); return; }
+      this.showToast('✅ Session cleared — scan the QR to link a new number');
       await this.loadWhatsappStatus();
     },
 
@@ -2140,13 +2747,13 @@ function app() {
         this.leaveMonth = new Date().toISOString().slice(0, 7); // always open on current month
         await this.loadLeaves();
       }
-      if (p === 'customers')    this.customers   = await this.api('GET', '/api/customers');
-      if (p === 'pricing') {
-        if (!this.customers.length) this.customers = await this.api('GET', '/api/customers');
-        if (!this.services.length)  this.services  = await this.api('GET', '/api/services');
-        if (!this.settings.currency) this.settings = await this.api('GET', '/api/settings');
-        this.customerPrices = await this.api('GET', '/api/customer-prices');
+      if (p === 'training') {
+        this.settings        = await this.api('GET', '/api/settings');
+        this.trainingVideos  = await this.api('GET', '/api/training/videos');
       }
+      if (p === 'customers')    this.customers   = await this.api('GET', '/api/customers');
+      if (p === 'menu')         this.menuItems   = await this.api('GET', '/api/menu');
+      if (p === 'keywords')     this.keywords    = await this.api('GET', '/api/keywords');
       if (p === 'messages')     this.botMessages = await this.api('GET', '/api/messages');
       if (p === 'settings') {
         this.settings = await this.api('GET', '/api/settings');
@@ -2183,7 +2790,9 @@ function app() {
       const url = this.selectedHoursEmployee != null
         ? `/api/hours/${this.selectedHoursEmployee}`
         : '/api/hours';
-      await this.api('PUT', url, this.weeklyHours);
+      const res = await this.api('PUT', url, this.weeklyHours);
+      if (!this.authenticated) { this.showToast('❌ Session expired — please log in again.'); return; }
+      if (res.error) { this.showToast('❌ Failed to save: ' + res.error); return; }
       this.hoursSaved = true;
       setTimeout(() => this.hoursSaved = false, 3000);
       this.showToast('✅ Hours saved!');
@@ -2191,17 +2800,71 @@ function app() {
 
     async saveMessages() {
       const obj = Object.fromEntries(this.botMessages.map(m => [m.key, m.value]));
-      await this.api('PUT', '/api/messages', obj);
+      const res = await this.api('PUT', '/api/messages', obj);
+      if (!this.authenticated) { this.showToast('❌ Session expired — please log in again.'); return; }
+      if (res.error) { this.showToast('❌ Failed to save: ' + res.error); return; }
       this.messagesSaved = true;
       setTimeout(() => this.messagesSaved = false, 3000);
       this.showToast('✅ Messages saved!');
     },
 
+    async changePassword() {
+      this.pwForm.error = '';
+      if (!this.pwForm.current)  { this.pwForm.error = 'Enter your current password.'; return; }
+      if (!this.pwForm.newPw)    { this.pwForm.error = 'Enter a new password.'; return; }
+      if (this.pwForm.newPw !== this.pwForm.confirm) { this.pwForm.error = 'New passwords do not match.'; return; }
+      const res = await this.api('POST', '/api/auth/change-password', { current: this.pwForm.current, newPassword: this.pwForm.newPw });
+      if (res.error) { this.pwForm.error = res.error; return; }
+      this.pwForm = { current: '', newPw: '', confirm: '', error: '' };
+      this.showToast('✅ Password changed! Use your new password next time you log in.');
+    },
+
     async saveSettings() {
-      await this.api('PUT', '/api/settings', this.settings);
+      const res = await this.api('PUT', '/api/settings', this.settings);
+      if (!this.authenticated) { this.showToast('❌ Session expired — please log in again.'); return; }
+      if (res.error) { this.showToast('❌ Failed to save: ' + res.error); return; }
       this.settingsSaved = true;
       setTimeout(() => this.settingsSaved = false, 3000);
       this.showToast('✅ Settings saved!');
+    },
+
+    async uploadTrainingVideo() {
+      const file = this.trainingUploadFile;
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        try {
+          const result = await this.api('POST', '/api/training/videos', {
+            base64: e.target.result,
+            filename: file.name,
+            caption: this.trainingUploadCaption,
+          });
+          this.trainingVideos = await this.api('GET', '/api/training/videos');
+          this.trainingUploadFile    = null;
+          this.trainingUploadName    = '';
+          this.trainingUploadCaption = '';
+          this.showToast('✅ Training item uploaded!');
+        } catch (err) {
+          this.showToast('❌ Upload failed: ' + (err.message || 'Unknown error'));
+        }
+      };
+      reader.readAsDataURL(file);
+    },
+
+    async saveTrainingCaption(video) {
+      try {
+        await this.api('PUT', `/api/training/videos/${video.id}`, { caption: video.caption });
+        this.showToast('✅ Caption saved!');
+      } catch (err) {
+        this.showToast('❌ Failed to save caption.');
+      }
+    },
+
+    async deleteTrainingVideoById(id) {
+      if (!confirm('Remove this training video?')) return;
+      await this.api('DELETE', `/api/training/videos/${id}`);
+      this.trainingVideos = this.trainingVideos.filter(v => v.id !== id);
+      this.showToast('🗑️ Video removed.');
     },
 
     async testCalendar() {
@@ -2238,12 +2901,24 @@ function app() {
     },
 
     // Employee CRUD
-    openEmployeeModal(emp = null) {
+    async openEmployeeModal(emp = null) {
       this.editingEmployee = emp;
-      // excluded_service_ids = services this barber CANNOT do (empty = can do everything)
+      this.employeeTab = 'general';
+      this.fixedCustomerSearch = '';
+      // Load customers list if not already loaded (needed for Fixed Customers tab)
+      if (!this.customers.length) {
+        this.customers = await this.api('GET', '/api/customers');
+      }
+      // Reverse-map stored phone IDs → customer records
+      const storedPhones = emp?.fixed_customer_phones || [];
+      const fixedCustomerIds = [];
+      storedPhones.forEach(phone => {
+        const c = this.customers.find(c => Array.isArray(c.phones) && c.phones.includes(phone));
+        if (c && !fixedCustomerIds.includes(c.id)) fixedCustomerIds.push(c.id);
+      });
       this.employeeForm = emp
-        ? { name: emp.name, phone: emp.phone, color: emp.color, google_calendar_id: emp.google_calendar_id, excluded_service_ids: emp.excluded_service_ids || [], scan_pin: emp.scan_pin || '' }
-        : { name: '', phone: '', color: '#f59e0b', google_calendar_id: '', excluded_service_ids: [], scan_pin: '' };
+        ? { name: emp.name, phone: emp.phone, color: emp.color, google_calendar_id: emp.google_calendar_id, excluded_service_ids: emp.excluded_service_ids || [], scan_pin: emp.scan_pin || '', fixedCustomerIds, fallbackEmployeeIds: (emp.fallback_employee_ids || []).map(String), newFallbackId: '', does_house_calls: !!emp.does_house_calls }
+        : { name: '', phone: '', color: '#f59e0b', google_calendar_id: '', excluded_service_ids: [], scan_pin: '', fixedCustomerIds: [], fallbackEmployeeIds: [], newFallbackId: '', does_house_calls: false };
       this.showEmployeeModal = true;
     },
 
@@ -2351,14 +3026,32 @@ function app() {
 
     async saveEmployee() {
       if (!this.employeeForm.name) return;
+      // Resolve customer IDs → all their WhatsApp phone IDs
+      const phones = [];
+      (this.employeeForm.fixedCustomerIds || []).forEach(cid => {
+        const c = this.customers.find(c => c.id === cid);
+        if (c && Array.isArray(c.phones)) phones.push(...c.phones);
+      });
+      const { fixedCustomerIds, fallbackEmployeeIds, newFallbackId, ...formRest } = this.employeeForm;
+      const payload = { ...formRest, fixed_customer_phones: phones, fallback_employee_ids: (fallbackEmployeeIds || []).map(Number) };
       if (this.editingEmployee) {
-        await this.api('PUT', `/api/employees/${this.editingEmployee.id}`, this.employeeForm);
+        await this.api('PUT', `/api/employees/${this.editingEmployee.id}`, payload);
       } else {
-        await this.api('POST', '/api/employees', this.employeeForm);
+        await this.api('POST', '/api/employees', payload);
       }
       this.employees = await this.api('GET', '/api/employees');
       this.showEmployeeModal = false;
       this.showToast(this.editingEmployee ? '✅ Barber updated!' : '✅ Barber added!');
+    },
+
+    // Name of the active barber (other than the one in the modal) already using
+    // this color, or '' if it's free. Mirrors the server-side check in
+    // createEmployee/updateEmployee so the picker doesn't offer a color that
+    // would just get rejected on save.
+    colorTakenBy(hex) {
+      const editingId = this.editingEmployee?.id;
+      const other = this.employees.find(e => e.is_active && e.color === hex && String(e.id) !== String(editingId));
+      return other?.name || '';
     },
 
     async toggleEmployee(id) {
@@ -2366,38 +3059,12 @@ function app() {
       this.employees = await this.api('GET', '/api/employees');
     },
 
-    // ── Special pricing ───────────────────────────────────────────────────────
-
-    openPriceModal(row = null) {
-      this.editingPriceId = row ? row.id : null;
-      this.priceForm = row
-        ? { customer_id: row.customer_id, service_id: row.service_id, price: row.price, error: '' }
-        : { customer_id: '', service_id: '', price: '', error: '' };
-      this.priceCustomerSearch = row ? row.customer_name : '';
-      this.showPriceModal = true;
-    },
-
-    async saveCustomerPrice() {
-      const f = this.priceForm;
-      if (!f.customer_id || !f.service_id || f.price === '' || f.price === null) {
-        this.priceForm.error = 'Please fill in all fields.'; return;
-      }
-      const res = await this.api('PUT', '/api/customer-prices', {
-        customer_id: f.customer_id,
-        service_id:  f.service_id,
-        price:       f.price,
-      });
-      if (res.error) { this.priceForm.error = res.error; return; }
-      this.showPriceModal = false;
-      this.customerPrices = await this.api('GET', '/api/customer-prices');
-      this.showToast('✅ Special price saved!');
-    },
-
-    async deleteCustomerPrice(id) {
-      if (!confirm('Remove this special price?')) return;
-      await this.api('DELETE', `/api/customer-prices/${id}`);
-      this.customerPrices = await this.api('GET', '/api/customer-prices');
-      this.showToast('🗑️ Removed');
+    async deleteEmployee(emp) {
+      if (!confirm(`Permanently delete ${emp.name}? This cannot be undone.\n\nThey'll be removed from the barber list and booking flow. Their past appointments stay on record with the name "${emp.name}" attached, but won't be linked to a live barber anymore (e.g. can't reassign their schedule).`)) return;
+      const result = await this.api('DELETE', `/api/employees/${emp.id}`);
+      if (result.error) { this.showToast(`❌ ${result.error}`); return; }
+      this.employees = this.employees.filter(e => e.id !== emp.id);
+      this.showToast(`🗑️ ${emp.name} deleted`);
     },
 
     // ── Surinamese holidays ───────────────────────────────────────────────────
@@ -2500,11 +3167,84 @@ function app() {
       return this.employees.find(e => String(e.id) === String(id))?.name || '?';
     },
 
+    // ── Menu order ───────────────────────────────────────────────────────────
+    menuMove(idx, dir) {
+      const to = idx + dir;
+      if (to < 0 || to >= this.menuItems.length) return;
+      const arr = [...this.menuItems];
+      [arr[idx], arr[to]] = [arr[to], arr[idx]];
+      this.menuItems = arr;
+    },
+    async saveMenuOrder() {
+      const res = await this.api('PUT', '/api/menu', this.menuItems);
+      if (!this.authenticated) { this.showToast('❌ Session expired — please log in again.'); return; }
+      if (res.error) { this.showToast('❌ Failed to save: ' + res.error); return; }
+      this.menuSaved = true;
+      setTimeout(() => this.menuSaved = false, 2500);
+      this.showToast('✅ Menu order saved');
+    },
+
+    // ── Keywords ─────────────────────────────────────────────────────────────
+    keywordGroups() {
+      const defs = [
+        { action: 'booking',  icon: '📅', label: 'Booking' },
+        { action: 'gallery',  icon: '📸', label: 'Gallery / Styles' },
+        { action: 'training', icon: '🎓', label: 'Training' },
+        { action: 'hours',    icon: '🕐', label: 'Opening Hours' },
+        { action: 'location', icon: '📍', label: 'Location' },
+        { action: 'contact',  icon: '📞', label: 'Contact' },
+        { action: 'manage',   icon: '🔧', label: 'Manage Booking' },
+      ];
+      return defs.map(d => ({ ...d, items: this.keywords.filter(k => k.action === d.action) }));
+    },
+    async addKeyword() {
+      const kw = (this.newKeyword.keyword || '').trim().toLowerCase();
+      if (!kw) { this.showToast('⚠️ Enter a keyword first'); return; }
+      if (this.keywords.some(k => k.keyword === kw)) {
+        this.showToast('⚠️ That keyword already exists'); return;
+      }
+      await this.api('POST', '/api/keywords', { keyword: kw, action: this.newKeyword.action });
+      this.keywords = await this.api('GET', '/api/keywords');
+      this.newKeyword.keyword = '';
+      this.showToast('✅ Keyword added');
+    },
+    async toggleKeyword(k) {
+      await this.api('PUT', `/api/keywords/${k.id}`, { ...k, enabled: k.enabled ? 0 : 1 });
+      this.keywords = await this.api('GET', '/api/keywords');
+    },
+    async deleteKeyword(id) {
+      await this.api('DELETE', `/api/keywords/${id}`);
+      this.keywords = this.keywords.filter(k => k.id !== id);
+    },
+
     // ── Customer management ───────────────────────────────────────────────────
     filteredCustomers() {
       if (this.customerFilter === 'noshows') return this.customers.filter(c => c.no_show_count > 0);
       if (this.customerFilter === 'blocked')  return this.customers.filter(c => c.is_blocked);
       return this.customers;
+    },
+    async saveCustomerName(c) {
+      const name = (this.editingCustomerName?.value || '').trim();
+      if (!name) return;
+      await this.api('PUT', `/api/customers/${c.id}`, { name });
+      this.customers = await this.api('GET', '/api/customers');
+      this.editingCustomerName = null;
+      this.showToast('✅ Name updated');
+    },
+    async deleteCustomer(id) {
+      if (!confirm('Delete this customer? This cannot be undone.')) return;
+      await this.api('DELETE', `/api/customers/${id}`);
+      this.customers = this.customers.filter(c => c.id !== id);
+      this.showToast('🗑️ Customer deleted');
+    },
+    async openCustomerStats(customer, view) {
+      const titles = { bookings: '📋 All Bookings', noshows: '⚠️ No-Shows', ratings: '⭐ Rated Appointments' };
+      this.customerStatsModal = { customer, title: titles[view], items: [], loading: true };
+      const all = await this.api('GET', `/api/customers/${customer.id}/appointments`);
+      let items = all;
+      if (view === 'noshows') items = all.filter(a => a.status === 'no-show');
+      if (view === 'ratings') items = all.filter(a => a.rating);
+      this.customerStatsModal = { ...this.customerStatsModal, items, loading: false };
     },
     async blockCustomer(id) {
       const reason = this.blockReasonInputs[id] || '';
@@ -2669,6 +3409,16 @@ function app() {
       this.showToast(`✅ Marked as ${status}`);
     },
 
+    async syncAllCalendar() {
+      if (!confirm('Re-sync ALL upcoming appointments to the currently configured Google Calendar?\n\nThis will create new events on the new calendar. Old events on the previous calendar are not deleted.')) return;
+      this.calSyncing = true;
+      const res = await this.api('POST', '/api/appointments/sync-all-calendar');
+      this.calSyncing = false;
+      if (res.error) { this.showToast('❌ ' + res.error); return; }
+      this.showToast(`✅ Synced ${res.synced} appointment(s) to Google Calendar${res.failed ? ` (${res.failed} failed)` : ''}!`);
+      await this.loadAppointments();
+    },
+
     async syncToCalendar(appt) {
       this.showToast('📅 Syncing to Google Calendar…');
       const res = await this.api('POST', `/api/appointments/${appt.id}/sync-calendar`);
@@ -2689,13 +3439,13 @@ function app() {
 
     fmtTime(dt) {
       if (!dt) return '—';
-      return new Date(dt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+      return new Date(dt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Paramaribo' });
     },
 
     fmtDateTime(dt) {
       if (!dt) return '—';
       const d = new Date(dt);
-      return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ' ' + this.fmtTime(dt);
+      return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'America/Paramaribo' }) + ' ' + this.fmtTime(dt);
     },
 
     // ── Closed Dates / Blocks ─────────────────────────────────────────────────

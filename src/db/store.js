@@ -10,6 +10,40 @@
 const fs   = require('fs');
 const path = require('path');
 
+// ── Resilient JSON persistence ──────────────────────────────────────────────────
+
+/**
+ * Read JSON from disk, resilient to corruption: try the live file, then a .bak
+ * (previous good copy), then the fallback. A present-but-corrupt file is never
+ * silently treated as empty without first trying its .bak.
+ */
+function loadJson(file, fallback) {
+  for (const f of [file, `${file}.bak`]) {
+    try {
+      if (!fs.existsSync(f)) continue;
+      const parsed = JSON.parse(fs.readFileSync(f, 'utf8'));
+      if (f.endsWith('.bak')) console.error(`⚠️  ${file} unreadable — recovered from .bak`);
+      return parsed;
+    } catch (e) {
+      console.error(`⚠️  Failed to parse ${f}: ${e.message}`);
+    }
+  }
+  return fallback;
+}
+
+/**
+ * Atomic write: serialize to a temp file, keep the previous file as .bak, then
+ * rename into place. rename() is atomic, so a concurrent reader — or a crash
+ * mid-write — can never observe a truncated or empty file. This is the fix for
+ * the wipe that happened when two processes wrote the same file at once.
+ */
+function saveJson(file, data) {
+  const tmp = `${file}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf8');
+  try { if (fs.existsSync(file)) fs.copyFileSync(file, `${file}.bak`); } catch (_) {}
+  fs.renameSync(tmp, file);
+}
+
 // ── JsonCollection ────────────────────────────────────────────────────────────
 
 class JsonCollection {
@@ -24,14 +58,9 @@ class JsonCollection {
 
   // ── persistence ─────────────────────────────────────────────────────────────
 
-  _load() {
-    try { return JSON.parse(fs.readFileSync(this.file, 'utf8')); }
-    catch { return []; }
-  }
+  _load() { return loadJson(this.file, []); }
 
-  _save() {
-    fs.writeFileSync(this.file, JSON.stringify(this._data, null, 2), 'utf8');
-  }
+  _save() { saveJson(this.file, this._data); }
 
   // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -130,14 +159,9 @@ class JsonKVStore {
     this._data = this._load();
   }
 
-  _load() {
-    try { return JSON.parse(fs.readFileSync(this.file, 'utf8')); }
-    catch { return {}; }
-  }
+  _load() { return loadJson(this.file, {}); }
 
-  _save() {
-    fs.writeFileSync(this.file, JSON.stringify(this._data, null, 2), 'utf8');
-  }
+  _save() { saveJson(this.file, this._data); }
 
   get(key)         { return this._data[key]; }
   set(key, value)  { this._data[key] = value; this._save(); }

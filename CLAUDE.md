@@ -79,7 +79,7 @@ KV store: `settings`
 | File | What it does |
 |---|---|
 | `src/index.js` | Entry point. Bot events → `waUpdate()` + `setClient()`. No `process.exit` on disconnect (dashboard stays alive). |
-| `src/handlers/conversationHandler.js` | Full booking state machine. States: IDLE → MAIN_MENU → SELECTING_SERVICE → SELECTING_EMPLOYEE → SELECTING_DATE → SELECTING_TIME → ENTERING_NAME → CONFIRMING_BOOKING |
+| `src/handlers/conversationHandler.js` | Full booking state machine. States: IDLE → MAIN_MENU → SELECTING_SERVICE → SELECTING_EMPLOYEE → SELECTING_DATE → SELECTING_TIME → ENTERING_NAME → *(auto-booked, no confirm step)* |
 | `src/db/queries.js` | `generateBookingCode()`, `createAppointment()`, `getAvailableSlotsForEmployee()`, `pickLeastBusyEmployee()`, `getAvailableDates()` |
 | `src/services/googleCalendar.js` | Service account auth, per-employee `calendarId`, creates events with booking code (never customer phone) |
 | `src/web/routes/api.js` | All REST endpoints. `/api/whatsapp/status` is intentionally **pre-auth** (QR must show before login). Everything else requires session auth. |

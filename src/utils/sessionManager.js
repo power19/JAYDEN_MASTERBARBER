@@ -3,8 +3,14 @@
  * Sessions expire after SESSION_TIMEOUT_MINUTES of inactivity.
  */
 
-const TIMEOUT_MS =
-  (parseInt(process.env.SESSION_TIMEOUT_MINUTES) || 30) * 60 * 1000;
+function getTimeoutMs() {
+  try {
+    const q = require('../db/queries');
+    const val = parseInt(q.getSetting('session_timeout_minutes'));
+    if (val > 0) return val * 60 * 1000;
+  } catch (_) {}
+  return (parseInt(process.env.SESSION_TIMEOUT_MINUTES) || 30) * 60 * 1000;
+}
 
 class SessionManager {
   constructor() {
@@ -16,7 +22,7 @@ class SessionManager {
   /** Returns the existing (non-expired) session or creates a fresh one. */
   getSession(userId) {
     const s = this.sessions.get(userId);
-    if (!s || Date.now() - s.lastActivity > TIMEOUT_MS) {
+    if (!s || Date.now() - s.lastActivity > getTimeoutMs()) {
       return this._create(userId);
     }
     s.lastActivity = Date.now();
@@ -59,7 +65,7 @@ class SessionManager {
   _cleanup() {
     const now = Date.now();
     for (const [id, s] of this.sessions) {
-      if (now - s.lastActivity > TIMEOUT_MS) this.sessions.delete(id);
+      if (now - s.lastActivity > getTimeoutMs()) this.sessions.delete(id);
     }
   }
 }

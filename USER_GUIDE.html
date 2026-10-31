@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Jayden's Barbershop — How To Use The App</title>
+<style>
+  :root{
+    --ink:#1e293b; --muted:#64748b; --line:#e2e8f0;
+    --brand:#0f766e; --brand-light:#ccfbf1; --accent:#f59e0b;
+  }
+  *{box-sizing:border-box;}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    color:var(--ink); line-height:1.6; margin:0; background:#f8fafc;
+  }
+  .wrap{max-width:880px;margin:0 auto;padding:48px 32px 96px;}
+  header.hero{
+    background:linear-gradient(135deg,var(--brand) 0%, #134e4a 100%);
+    color:#fff; padding:56px 32px; border-radius:16px; margin-bottom:40px;
+    text-align:center;
+  }
+  header.hero h1{margin:0 0 8px; font-size:2.1rem;}
+  header.hero p{margin:0; opacity:.9; font-size:1.05rem;}
+  h2{
+    font-size:1.5rem; margin:48px 0 16px; padding-bottom:10px;
+    border-bottom:3px solid var(--brand); color:var(--brand);
+  }
+  h3{font-size:1.15rem; margin:28px 0 10px; color:var(--ink);}
+  p{margin:10px 0;}
+  .card{
+    background:#fff; border:1px solid var(--line); border-radius:12px;
+    padding:20px 24px; margin:16px 0; box-shadow:0 1px 3px rgba(0,0,0,.04);
+  }
+  .grid{display:grid; grid-template-columns:1fr 1fr; gap:16px;}
+  @media (max-width:680px){ .grid{grid-template-columns:1fr;} }
+  .pill{
+    display:inline-block; background:var(--brand-light); color:var(--brand);
+    border-radius:999px; padding:3px 12px; font-size:.8rem; font-weight:600; margin-bottom:8px;
+  }
+  table{width:100%; border-collapse:collapse; margin:14px 0;}
+  th,td{text-align:left; padding:10px 12px; border-bottom:1px solid var(--line); font-size:.95rem;}
+  th{background:#f1f5f9; color:var(--muted); font-weight:600; font-size:.8rem; text-transform:uppercase; letter-spacing:.03em;}
+  code, .kbd{
+    background:#f1f5f9; border:1px solid var(--line); border-radius:6px;
+    padding:2px 7px; font-size:.85em; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  ul, ol{padding-left:22px;}
+  li{margin:6px 0;}
+  .note{
+    background:#fffbeb; border-left:4px solid var(--accent); border-radius:6px;
+    padding:12px 16px; margin:16px 0; font-size:.95rem;
+  }
+  .note strong{color:#92400e;}
+  .tip{
+    background:#ecfeff; border-left:4px solid #0891b2; border-radius:6px;
+    padding:12px 16px; margin:16px 0; font-size:.95rem;
+  }
+  .tip strong{color:#0e7490;}
+  .toc{background:#fff; border:1px solid var(--line); border-radius:12px; padding:20px 28px;}
+  .toc h2{margin-top:0; border:none; padding:0; font-size:1.2rem;}
+  .toc ol{columns:2; column-gap:32px;}
+  .toc a{color:var(--brand); text-decoration:none; font-weight:500;}
+  .toc a:hover{text-decoration:underline;}
+  .flow{
+    background:#fff; border:1px solid var(--line); border-radius:12px; padding:20px 24px;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:.85rem;
+    white-space:pre; overflow-x:auto; line-height:1.5; color:#334155;
+  }
+  footer{text-align:center; color:var(--muted); font-size:.85rem; margin-top:64px;}
+  @media print{
+    body{background:#fff;}
+    .wrap{padding:0; max-width:none;}
+    header.hero{border-radius:0;}
+    .card{box-shadow:none; break-inside:avoid;}
+    h2{break-after:avoid;}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <h1>💈 Jayden's Barbershop</h1>
+    <p>A practical guide to running the WhatsApp booking bot and the admin dashboard</p>
+  </header>
+
+  <nav class="toc">
+    <h2>Contents</h2>
+    <ol>
+      <li><a href="#overview">1. What this app does</a></li>
+      <li><a href="#customer-side">2. The customer experience (WhatsApp)</a></li>
+      <li><a href="#dashboard">3. Logging into the admin dashboard</a></li>
+      <li><a href="#dashboard-tour">4. Dashboard walkthrough</a></li>
+      <li><a href="#daily">5. Daily / weekly routine</a></li>
+      <li><a href="#scanner">6. The barber check-in scanner</a></li>
+      <li><a href="#troubleshooting">7. Troubleshooting</a></li>
+    </ol>
+  </nav>
+
+  <!-- 1 -->
+  <h2 id="overview">1. What this app does</h2>
+  <p>
+    This system is made up of two connected parts:
+  </p>
+  <div class="grid">
+    <div class="card">
+      <span class="pill">📱 WhatsApp Bot</span>
+      <p>Customers message the shop's WhatsApp number. The bot greets them, lets them
+      pick a language, browse services, check hours/location, and book an appointment —
+      all without installing an app.</p>
+    </div>
+    <div class="card">
+      <span class="pill">🖥️ Admin Dashboard</span>
+      <p>A web page (open in any browser) where the shop owner/staff manage everything:
+      appointments, barbers, working hours, services & prices, photos, customers, and
+      all the bot's settings and messages.</p>
+    </div>
+  </div>
+  <p>Appointments booked through WhatsApp are automatically synced to Google Calendar, so
+  the barber's schedule always stays up to date.</p>
+
+  <!-- 2 -->
+  <h2 id="customer-side">2. The customer experience (WhatsApp)</h2>
+  <p>When someone messages the shop's WhatsApp number for the first time, the bot walks them through:</p>
+  <div class="flow">Customer sends any message
+        │
+        ▼
+🌐 Choose a language (Dutch / English / Spanish / French / Portuguese)
+        │
+        ▼
+📋 Main Menu
+   ├─ Book an appointment   → service → barber → date → time → name → confirm ✅
+   ├─ Services & prices
+   ├─ Opening hours
+   ├─ Location
+   ├─ Photo gallery of haircuts
+   ├─ Change language
+   ├─ Manage my appointment (reschedule / cancel)
+   └─ Call us
+</div>
+  <p>Returning customers who already picked a language and gave their name skip straight
+  to the main menu and get a personal welcome.</p>
+
+  <h3>Handy shortcuts customers can type anytime</h3>
+  <table>
+    <tr><th>Type…</th><th>What happens</th></tr>
+    <tr><td><code>menu</code> / <code>hi</code> / <code>hello</code></td><td>Jump back to the main menu</td></tr>
+    <tr><td><code>0</code> / <code>back</code></td><td>Go one step back</td></tr>
+    <tr><td><code>cancel</code> / <code>exit</code></td><td>Cancel whatever they're doing</td></tr>
+    <tr><td><code>language</code> / <code>taal</code> / <code>idioma</code></td><td>Change their language</td></tr>
+  </table>
+
+  <div class="note">
+    <strong>Need to step in personally?</strong> Staff can "take over" a chat by sending
+    the takeover keyword (configurable in <em>Settings → Booking</em>, default <code>#human</code>)
+    — this pauses the bot for that customer so a real person can reply. Send the release
+    keyword (default <code>#bot</code>) to hand the conversation back to the bot.
+  </div>
+
+  <!-- 3 -->
+  <h2 id="dashboard">3. Logging into the admin dashboard</h2>
+  <ol>
+    <li>Open the dashboard URL in a browser (the one configured under <em>Settings → Integrations → Shop URL</em>).</li>
+    <li>Enter the admin password (set in <em>Settings → Security</em>; change it from the default as soon as possible).</li>
+    <li>You'll land on the <strong>Dashboard</strong> page, showing today's schedule and key numbers at a glance.</li>
+  </ol>
+  <div class="tip"><strong>Tip:</strong> Bookmark the dashboard on your phone's home screen — it works like a regular web page on mobile.</div>
+
+  <!-- 4 -->
+  <h2 id="dashboard-tour">4. Dashboard walkthrough</h2>
+  <p>The sidebar gives you access to every part of the shop. Here's what each section is for:</p>
+
+  <h3>📊 Dashboard</h3>
+  <p>A quick overview: today's appointments, upcoming bookings, and key shop numbers — your daily starting point.</p>
+
+  <h3>📅 Appointments</h3>
+  <p>See every booking — past, upcoming, no-shows, and rated visits. Filter, search, reschedule,
+  cancel, mark as completed/no-show, and re-sync individual appointments (or all of them) to Google Calendar.</p>
+
+  <h3>👥 Employees</h3>
+  <p>Add and manage barbers: names, photos, which services they perform, and whether they're
+  currently active or "away".</p>
+
+  <h3>🕒 Work Hours</h3>
+  <p>Set opening and closing times for each day of the week — per barber if needed. This
+  controls which time slots the bot offers to customers.</p>
+
+  <h3>✂️ Services</h3>
+  <p>Manage the list of services offered (haircut, beard trim, etc.), their prices, durations,
+  and whether they're currently bookable.</p>
+
+  <h3>🏖️ Leave</h3>
+  <p>Schedule time off for individual barbers (holidays, sick days). The bot automatically
+  stops offering slots with that barber during their leave period.</p>
+
+  <h3>🚫 Closed Dates &amp; Blocks</h3>
+  <p>Block off whole days or specific time windows shop-wide — public holidays, special
+  closures, etc. Surinamese public holidays can be synced in automatically.</p>
+
+  <h3>📸 Gallery</h3>
+  <p>Upload and tag photos of haircuts/styles. Customers can browse this gallery from the
+  WhatsApp main menu for inspiration.</p>
+
+  <h3>📋 Menu Order</h3>
+  <p>Control which options appear in the bot's main menu, their order, whether they're
+  enabled, and their labels.</p>
+
+  <h3>🎓 Training</h3>
+  <p>Upload training videos for new barbers — accessible through the bot's "Barber course information" option.</p>
+
+  <h3>👤 Customers</h3>
+  <p>Browse the customer list — names, phone numbers, preferred language, booking history,
+  and the option to block/unblock problem customers.</p>
+
+  <h3>🔑 Keywords</h3>
+  <p>Define custom keywords/phrases the bot should recognise and respond to outside the
+  normal menu flow (e.g. FAQs, special triggers).</p>
+
+  <h3>💬 Bot Messages</h3>
+  <p>Customise the wording of automatic messages the bot sends (welcome messages, reminders,
+  confirmations, etc.).</p>
+
+  <h3>⚙️ Settings</h3>
+  <p>The control center for the whole system, organised into tabs:</p>
+  <table>
+    <tr><th>Tab</th><th>What you'll find there</th></tr>
+    <tr><td>🏪 Shop</td><td>Shop name, address, contact details, social links, currency, timezone, and the WhatsApp <strong>language-selection menu prompt</strong></td></tr>
+    <tr><td>📅 Booking</td><td>How far ahead customers can book, reminder timing, cancel/check-in windows, takeover keywords</td></tr>
+    <tr><td>🔔 Notifications</td><td>Reminder messages and missed-appointment warning messages</td></tr>
+    <tr><td>⚠️ Rules</td><td>No-show thresholds and the messages sent at each warning level</td></tr>
+    <tr><td>🔗 Integrations</td><td>Google Calendar ID, shop URL, and connection tests</td></tr>
+    <tr><td>🔒 Security</td><td>Change the admin password and the barber check-in PIN</td></tr>
+  </table>
+
+  <!-- 5 -->
+  <h2 id="daily">5. Daily / weekly routine</h2>
+  <ul>
+    <li><strong>Each morning</strong> — open the Dashboard to see today's bookings and confirm staffing.</li>
+    <li><strong>When a barber is off</strong> — add it under <em>Leave</em> so the bot stops offering them as an option.</li>
+    <li><strong>Holidays / closures</strong> — add them under <em>Closed Dates &amp; Blocks</em> ahead of time.</li>
+    <li><strong>New haircut photos</strong> — upload to the <em>Gallery</em> regularly to keep it fresh for customers.</li>
+    <li><strong>Check no-shows</strong> — review the <em>Appointments</em> page; repeat no-shows trigger the warning messages configured under <em>Settings → Rules</em>.</li>
+  </ul>
+
+  <!-- 6 -->
+  <h2 id="scanner">6. The barber check-in scanner</h2>
+  <p>
+    Each barber can use a dedicated check-in page (separate from the admin dashboard) to
+    scan a customer's appointment QR code when they arrive. It's protected with its own PIN
+    (set under <em>Settings → Security</em>), and only works within the configured check-in
+    time window around the appointment time.
+  </p>
+
+  <!-- 7 -->
+  <h2 id="troubleshooting">7. Troubleshooting</h2>
+  <table>
+    <tr><th>Problem</th><th>What to try</th></tr>
+    <tr><td>Bot isn't replying to customers</td><td>Check the WhatsApp connection status in the dashboard — the phone may have lost its link and need re-scanning.</td></tr>
+    <tr><td>A customer is stuck talking to the bot and needs a human</td><td>Send the takeover keyword (default <code>#human</code>) in that chat, reply manually, then send the release keyword (default <code>#bot</code>) when done.</td></tr>
+    <tr><td>No time slots are showing for booking</td><td>Check Work Hours, Leave, and Closed Dates — one of these may be blocking availability. Also confirm the Google Calendar connection in Settings → Integrations.</td></tr>
+    <tr><td>Wrong shop info shown to customers (address, phone, etc.)</td><td>Update it under Settings → Shop — changes apply immediately, no restart needed.</td></tr>
+    <tr><td>Forgot the admin password</td><td>Ask whoever manages the server to reset it directly in the system settings.</td></tr>
+  </table>
+
+  <footer>
+    Jayden's Barbershop — Internal guide · Generated for day-to-day use of the booking bot &amp; admin dashboard
+  </footer>
+</div>
+</body>
+</html>

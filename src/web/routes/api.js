@@ -6,7 +6,7 @@ const express   = require('express');
 const router    = express.Router();
 const q                  = require('../../db/queries');
 const { state: waState, update: waUpdate } = require('../../whatsapp-state');
-const { GCAL_COLORS, cancelEvent, createLeaveEvent } = require('../../services/googleCalendar');
+const { GCAL_COLORS, cancelEvent, createLeaveEvent, updateEvent: calUpdate } = require('../../services/googleCalendar');
 const { getClient }      = require('../../whatsapp-client');
 const chatPause          = require('../../utils/chatPause');
 const { startBot }       = require('../../bot-runner');
@@ -18,11 +18,35 @@ function requireAuth(req, res, next) {
   res.status(401).json({ error: 'Not authenticated' });
 }
 
+/**
+ * Best-effort: mark a completed/no-show appointment's Google Calendar event
+ * with a status label, so the event itself (not just the local record)
+ * reflects what happened — useful as a recovery fallback if local data is
+ * ever lost. Never throws; a Calendar hiccup must never block the caller.
+ */
+async function syncCalendarStatus(appt, statusLabel) {
+  if (!appt?.google_event_id) return; // never synced to Calendar — nothing to patch
+  try {
+    const calendarId = q.getSetting('google_calendar_id') ||
+      (process.env.GOOGLE_CALENDAR_ID !== 'primary' ? process.env.GOOGLE_CALENDAR_ID : null);
+    if (!calendarId) return;
+    const employee = appt.employee_id ? q.getEmployee(appt.employee_id) : null;
+    await calUpdate({
+      calendarId, eventId: appt.google_event_id,
+      startTime: new Date(appt.start_time), endTime: new Date(appt.end_time),
+      service: { name: appt.service_name, price: appt.service_price, duration: appt.service_duration },
+      customerName: appt.customer_name, bookingCode: appt.booking_code,
+      employeeName: employee?.name || appt.employee_name, employeeColor: employee?.color,
+      statusLabel,
+    });
+  } catch (e) { console.error('⚠️  Calendar status sync failed:', e.message); }
+}
+
 // ── Auth ──────────────────────────────────────────────────────────────────────
 
 router.post('/auth/login', (req, res) => {
   const { password } = req.body;
-  const adminPw = process.env.ADMIN_PASSWORD || 'admin';
+  const adminPw = q.getSetting('admin_password') || process.env.ADMIN_PASSWORD || 'admin';
   if (password === adminPw) {
     req.session.authenticated = true;
     res.json({ ok: true });
@@ -33,6 +57,15 @@ router.post('/auth/login', (req, res) => {
 
 router.post('/auth/logout', (req, res) => {
   req.session.destroy(() => res.json({ ok: true }));
+});
+
+router.post('/auth/change-password', requireAuth, (req, res) => {
+  const { current, newPassword } = req.body;
+  const adminPw = q.getSetting('admin_password') || process.env.ADMIN_PASSWORD || 'admin';
+  if (current !== adminPw) return res.status(400).json({ error: 'Current password is incorrect' });
+  if (!newPassword || newPassword.length < 4) return res.status(400).json({ error: 'New password must be at least 4 characters' });
+  q.setSetting('admin_password', newPassword);
+  res.json({ ok: true });
 });
 
 router.get('/auth/status', (req, res) => {
@@ -58,9 +91,15 @@ router.post('/scan/auth', (req, res) => {
   }
 });
 
-/** Barber check-in — requires barber PIN session (NOT admin auth). */
+/** Barber check-in — requires barber PIN session (NOT admin auth), or the PIN
+ *  itself in the body for server-to-server calls (e.g. the Kassa marking a
+ *  booking complete when it's paid at the register — no shared session to use).
+ *  Unlike /scan/auth, this path has NO fallback default — if barber_scan_pin
+ *  isn't explicitly configured, the PIN-in-body path can never succeed. */
 router.post('/scan/checkin/:code', (req, res) => {
-  if (!req.session?.barberAuthenticated && !req.session?.authenticated) {
+  const configuredPin = q.getSetting('barber_scan_pin');
+  const pinOk = !!configuredPin && req.body?.pin && String(req.body.pin) === String(configuredPin);
+  if (!pinOk && !req.session?.barberAuthenticated && !req.session?.authenticated) {
     return res.status(401).json({ ok: false, message: 'Not authenticated — please enter your PIN' });
   }
   try {
@@ -85,6 +124,7 @@ router.post('/scan/checkin/:code', (req, res) => {
     }
 
     q.updateAppointment(appt.id, { status: 'completed' });
+    syncCalendarStatus(appt, '✅'); // best-effort, not awaited — never delays the check-in response
     const employee    = appt.employee_id ? q.getEmployee(appt.employee_id) : null;
     const scannedBy   = req.session.barberEmployeeName || 'Admin';
     console.log(`✅ Check-in by ${scannedBy}: ${appt.customer_name} — ${appt.booking_code}`);
@@ -134,8 +174,9 @@ router.get('/checkin/:code', (req, res) => {
 
   function apptDetail(a) {
     const emp  = a.employee_id ? q.getEmployee(a.employee_id) : null;
-    const date = new Date(a.start_time).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-    const time = new Date(a.start_time).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+    const tz   = q.getSetting('timezone') || 'America/Paramaribo';
+    const date = new Date(a.start_time).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: tz });
+    const time = new Date(a.start_time).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: tz });
     return `<div class="detail">
       <strong>👤</strong> ${a.customer_name}<br>
       <strong>✂️</strong> ${a.service_emoji || ''} ${a.service_name}<br>
@@ -170,6 +211,7 @@ router.post('/checkin/:code', requireAuth, (req, res) => {
     if (appt.status === 'completed') return res.json({ ok: false, already: true, message: 'Already checked in', customer_name: appt.customer_name, service_name: appt.service_name, service_emoji: appt.service_emoji || '✂️' });
 
     q.updateAppointment(appt.id, { status: 'completed' });
+    syncCalendarStatus(appt, '✅'); // best-effort, not awaited — never delays the check-in response
     const employee = appt.employee_id ? q.getEmployee(appt.employee_id) : null;
     console.log(`✅ Check-in: ${appt.customer_name} — ${appt.booking_code}`);
     res.json({
@@ -243,6 +285,31 @@ router.post('/whatsapp/reconnect', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// POST /api/whatsapp/reset-session — wipes saved session so a fresh QR appears.
+// Use when changing the WhatsApp number linked to the bot.
+router.post('/whatsapp/reset-session', async (req, res) => {
+  try {
+    const path = require('path');
+    const fs   = require('fs');
+    const { getClient }   = require('../../whatsapp-client');
+    const { update: waUpdate } = require('../../whatsapp-state');
+
+    // Destroy active client first
+    const c = getClient();
+    if (c) await c.destroy().catch(() => {});
+
+    // Delete the saved session folder
+    const sessionDir = path.join(process.cwd(), '.wwebjs_auth');
+    if (fs.existsSync(sessionDir)) fs.rmSync(sessionDir, { recursive: true, force: true });
+
+    waUpdate({ status: 'initializing', qrDataUrl: null });
+
+    // Re-initialize so a fresh QR appears immediately
+    await startBot();
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── Dashboard ─────────────────────────────────────────────────────────────────
 
 router.get('/dashboard', (req, res) => {
@@ -292,9 +359,8 @@ router.post('/appointments', async (req, res) => {
       const employee    = req.body.employee_id ? q.getEmployee(req.body.employee_id) : null;
       const shopCalId   = q.getSetting('google_calendar_id') ||
         (process.env.GOOGLE_CALENDAR_ID !== 'primary' ? process.env.GOOGLE_CALENDAR_ID : null);
-      const barberCalId = employee?.google_calendar_id || null;
 
-      if (shopCalId || barberCalId) {
+      if (shopCalId && !result.duplicate) {
         const eventData = {
           service:       { name: req.body.service_name, emoji: req.body.service_emoji, duration: req.body.service_duration, price: req.body.service_price },
           startTime:     new Date(req.body.start_time),
@@ -304,17 +370,11 @@ router.post('/appointments', async (req, res) => {
           employeeName:  employee?.name,
           employeeColor: employee?.color,
         };
-        // Shop calendar — always
-        if (shopCalId) {
-          const r = await calCreate({ ...eventData, calendarId: shopCalId });
-          if (r.success) {
-            q.updateAppointment(id, { google_event_id: r.eventId, google_event_link: r.eventLink });
-            calendarSynced = true;
-          }
+        const r = await calCreate({ ...eventData, calendarId: shopCalId });
+        if (r.success) {
+          q.updateAppointment(id, { google_event_id: r.eventId, google_event_link: r.eventLink });
+          calendarSynced = true;
         }
-        // Barber's personal calendar — if different from shop calendar
-        if (barberCalId && barberCalId !== shopCalId)
-          await calCreate({ ...eventData, calendarId: barberCalId });
       }
     } catch (calErr) {
       console.error('⚠️  Calendar sync skipped:', calErr.message);
@@ -366,14 +426,11 @@ router.put('/appointments/:id', async (req, res) => {
         cancelEvent({ calendarId: shopCalId, eventId: appt.google_event_id })
           .catch(e => console.error('⚠️  Calendar cancel (shop):', e.message));
       }
-
-      // Delete from barber's personal calendar if set
-      const employee = appt.employee_id ? q.getEmployee(appt.employee_id) : null;
-      if (employee?.google_calendar_id) {
-        cancelEvent({ calendarId: employee.google_calendar_id, eventId: appt.google_event_id })
-          .catch(e => console.error('⚠️  Calendar cancel (barber):', e.message));
-      }
     }
+
+    // Completed/no-show: label the calendar event rather than deleting it.
+    if (req.body.status === 'completed') syncCalendarStatus(appt, '✅');
+    if (req.body.status === 'no-show')   syncCalendarStatus(appt, '👻');
 
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -390,12 +447,11 @@ router.post('/appointments/:id/sync-calendar', async (req, res) => {
     const employee    = appt.employee_id ? q.getEmployee(appt.employee_id) : null;
     const shopCalId   = q.getSetting('google_calendar_id') ||
       (process.env.GOOGLE_CALENDAR_ID !== 'primary' ? process.env.GOOGLE_CALENDAR_ID : null);
-    const barberCalId = employee?.google_calendar_id || null;
 
-    if (!shopCalId && !barberCalId)
+    if (!shopCalId)
       return res.status(400).json({ error: 'No calendar configured. Set a Calendar ID in Settings.' });
 
-    const { createAppointment: calCreate } = require('../../services/googleCalendar');
+    const { createAppointment: calCreate, cancelEvent } = require('../../services/googleCalendar');
     const eventData = {
       service:       { name: appt.service_name, emoji: appt.service_emoji, duration: appt.service_duration, price: appt.service_price },
       startTime:     new Date(appt.start_time),
@@ -406,21 +462,65 @@ router.post('/appointments/:id/sync-calendar', async (req, res) => {
       employeeColor: employee?.color,
     };
 
-    // Shop calendar — always (owner sees all appointments)
-    let shopResult = { success: false, error: 'No shop calendar set' };
-    if (shopCalId) {
-      shopResult = await calCreate({ ...eventData, calendarId: shopCalId });
-      if (shopResult.success) q.updateAppointment(appt.id, { google_event_id: shopResult.eventId, google_event_link: shopResult.eventLink });
+    // If this appointment already has a live event, remove it first — otherwise
+    // re-syncing leaves the old event orphaned on the calendar as a ghost
+    // duplicate (same booking code, stale barber/time) alongside the new one.
+    if (appt.google_event_id) {
+      await cancelEvent({ calendarId: shopCalId, eventId: appt.google_event_id }).catch(() => {});
     }
 
-    // Barber's personal calendar — if configured and different from shop calendar
-    if (barberCalId && barberCalId !== shopCalId)
-      await calCreate({ ...eventData, calendarId: barberCalId });
-
-    if (!shopResult.success && !barberCalId)
-      return res.status(500).json({ error: shopResult.error });
+    // Shop calendar — barbers see it via their read-only share
+    const shopResult = await calCreate({ ...eventData, calendarId: shopCalId });
+    if (shopResult.success) q.updateAppointment(appt.id, { google_event_id: shopResult.eventId, google_event_link: shopResult.eventLink });
+    else return res.status(500).json({ error: shopResult.error });
 
     res.json({ ok: true, eventLink: shopResult.eventLink });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/appointments/sync-all-calendar
+// Re-syncs ALL upcoming confirmed appointments to the currently configured calendar.
+// Useful when switching calendars — wipes old event IDs and creates fresh events.
+router.post('/appointments/sync-all-calendar', async (req, res) => {
+  try {
+    const { createAppointment: calCreate, cancelEvent } = require('../../services/googleCalendar');
+    const shopCalId = q.getSetting('google_calendar_id') ||
+      (process.env.GOOGLE_CALENDAR_ID !== 'primary' ? process.env.GOOGLE_CALENDAR_ID : null);
+
+    if (!shopCalId) return res.status(400).json({ error: 'No calendar configured in Settings.' });
+
+    const now   = new Date().toISOString();
+    const appts = q.getAppointments({}).filter(a =>
+      a.status !== 'cancelled' && a.start_time >= now
+    );
+
+    let synced = 0, failed = 0;
+    for (const appt of appts) {
+      try {
+        const employee = appt.employee_id ? q.getEmployee(appt.employee_id) : null;
+        const eventData = {
+          service:       { name: appt.service_name, emoji: appt.service_emoji, duration: appt.service_duration, price: appt.service_price },
+          startTime:     new Date(appt.start_time),
+          endTime:       new Date(appt.end_time),
+          customerName:  appt.customer_name,
+          bookingCode:   appt.booking_code,
+          employeeName:  employee?.name,
+          employeeColor: employee?.color,
+        };
+        // Remove the previous event first — otherwise every re-sync leaves the
+        // old one behind as an orphaned ghost duplicate on the calendar.
+        if (appt.google_event_id) {
+          await cancelEvent({ calendarId: shopCalId, eventId: appt.google_event_id }).catch(() => {});
+        }
+        const r = await calCreate({ ...eventData, calendarId: shopCalId });
+        if (r.success) {
+          q.updateAppointment(appt.id, { google_event_id: r.eventId, google_event_link: r.eventLink });
+          synced++;
+        } else { failed++; }
+      } catch { failed++; }
+    }
+
+    res.json({ ok: true, synced, failed, total: appts.length });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -478,18 +578,39 @@ router.get('/employees', (req, res) => {
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.post('/employees', (req, res) => {
+router.post('/employees', async (req, res) => {
   try {
-    const { name, phone, color, google_calendar_id, excluded_service_ids } = req.body;
+    const { name, phone, color, google_calendar_id, excluded_service_ids, does_house_calls } = req.body;
     if (!name) return res.status(400).json({ error: 'Name is required' });
-    const result = q.createEmployee(name, phone, color, google_calendar_id, excluded_service_ids || []);
+    const result = q.createEmployee(name, phone, color, google_calendar_id, excluded_service_ids || [], does_house_calls);
+    // Auto-share shop calendar with new barber if they have a Gmail set
+    if (google_calendar_id) {
+      const { shareCalendarWithBarber } = require('../../services/googleCalendar');
+      shareCalendarWithBarber(google_calendar_id).catch(e => console.error('⚠️  Calendar share failed:', e.message));
+    }
     res.json({ ok: true, id: result.lastInsertRowid });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.put('/employees/:id', (req, res) => {
+router.put('/employees/:id', async (req, res) => {
   try {
+    const existing = q.getEmployee(req.params.id);
+    const oldEmail = existing?.google_calendar_id || '';
+    const newEmail = req.body.google_calendar_id  || '';
+
     q.updateEmployee(req.params.id, req.body);
+
+    const { shareCalendarWithBarber, revokeCalendarShare } = require('../../services/googleCalendar');
+
+    // New email added or changed → share with new email
+    if (newEmail && newEmail !== oldEmail) {
+      shareCalendarWithBarber(newEmail).catch(e => console.error('⚠️  Calendar share failed:', e.message));
+    }
+    // Email removed → revoke old access
+    if (oldEmail && !newEmail) {
+      revokeCalendarShare(oldEmail).catch(e => console.error('⚠️  Calendar revoke failed:', e.message));
+    }
+
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -504,6 +625,13 @@ router.post('/employees/:id/away', (req, res) => {
 router.post('/employees/:id/toggle', (req, res) => {
   try {
     q.toggleEmployee(req.params.id);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.delete('/employees/:id', (req, res) => {
+  try {
+    q.deleteEmployee(req.params.id);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -568,29 +696,6 @@ router.post('/services/:id/toggle', (req, res) => {
 
 router.delete('/services/:id', (req, res) => {
   try { q.deleteService(req.params.id); res.json({ ok: true }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// ── Customer-specific pricing ─────────────────────────────────────────────────
-
-router.get('/customer-prices', (req, res) => {
-  try { res.json(q.getCustomerPrices()); }
-  catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-router.put('/customer-prices', (req, res) => {
-  try {
-    const { customer_id, service_id, price } = req.body;
-    if (!customer_id || !service_id || price == null || price === '') {
-      return res.status(400).json({ error: 'customer_id, service_id and price are required' });
-    }
-    q.setCustomerPrice({ customerId: customer_id, serviceId: service_id, price });
-    res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-router.delete('/customer-prices/:id', (req, res) => {
-  try { q.deleteCustomerPrice(req.params.id); res.json({ ok: true }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -695,6 +800,76 @@ router.delete('/customers/:id/phones/:phone', (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+router.delete('/customers/:id', (req, res) => {
+  try {
+    q.deleteCustomer(req.params.id);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.get('/customers/:id/appointments', (req, res) => {
+  try { res.json(q.getAppointmentsForCustomer(req.params.id)); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Menu order ────────────────────────────────────────────────────────────────
+
+const VALID_ACTIONS = new Set(['booking','hours','location','prices','contact','gallery','language','manage','training','feedback','privacy','house_call']);
+
+router.get('/menu', (req, res) => {
+  try {
+    const raw = q.getSetting('menu_order');
+    const items = raw ? JSON.parse(raw) : [];
+    res.json(items);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.put('/menu', (req, res) => {
+  try {
+    const items = (req.body || []).filter(m => VALID_ACTIONS.has(m.action)).map(m => ({
+      action: m.action,
+      enabled: !!m.enabled,
+      ...(m.labels && typeof m.labels === 'object' ? {
+        labels: Object.fromEntries(
+          ['en','nl','es','fr'].map(l => [l, String(m.labels[l] || '').trim().slice(0, 80)]).filter(([,v]) => v)
+        )
+      } : {})
+    }));
+    q.setSetting('menu_order', JSON.stringify(items));
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Keywords ──────────────────────────────────────────────────────────────────
+
+router.get('/keywords', (req, res) => {
+  try { res.json(q.getKeywords()); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/keywords', (req, res) => {
+  try {
+    const { keyword, action } = req.body;
+    if (!keyword || !action) return res.status(400).json({ error: 'keyword and action required' });
+    const k = q.addKeyword({ keyword, action });
+    res.json({ ok: true, keyword: k });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.put('/keywords/:id', (req, res) => {
+  try {
+    q.updateKeyword(req.params.id, req.body);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.delete('/keywords/:id', (req, res) => {
+  try {
+    q.deleteKeyword(req.params.id);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── Human Takeover ────────────────────────────────────────────────────────────
 
 router.get('/chat-pauses', (req, res) => {
@@ -721,12 +896,15 @@ router.post('/leaves', async (req, res) => {
     if (!employee_id || !start_date) return res.status(400).json({ error: 'employee_id and start_date required' });
     if (end_date && end_date < start_date) return res.status(400).json({ error: 'end_date must be on or after start_date' });
 
-    // Create Google Calendar all-day event on the employee's personal calendar
-    const employee = q.getEmployee(employee_id);
+    // Create a Google Calendar all-day event on the shop calendar
+    // (barbers see it through their read-only share)
+    const employee  = q.getEmployee(employee_id);
+    const shopCalId = q.getSetting('google_calendar_id') ||
+      (process.env.GOOGLE_CALENDAR_ID !== 'primary' ? process.env.GOOGLE_CALENDAR_ID : null);
     let googleEventId = '';
-    if (employee?.google_calendar_id) {
+    if (shopCalId && employee) {
       const gcalResult = await createLeaveEvent({
-        calendarId:   employee.google_calendar_id,
+        calendarId:   shopCalId,
         employeeName: employee.name,
         startDate:    start_date,
         endDate:      end_date || start_date,
@@ -748,12 +926,13 @@ router.post('/leaves', async (req, res) => {
 
 router.delete('/leaves/:id', async (req, res) => {
   try {
-    const leave    = q.getLeave(req.params.id);
-    const employee = leave?.employee_id ? q.getEmployee(leave.employee_id) : null;
+    const leave = q.getLeave(req.params.id);
 
-    // Remove from Google Calendar
-    if (leave?.google_event_id && employee?.google_calendar_id) {
-      cancelEvent({ calendarId: employee.google_calendar_id, eventId: leave.google_event_id })
+    // Remove from the shop calendar
+    const shopCalId = q.getSetting('google_calendar_id') ||
+      (process.env.GOOGLE_CALENDAR_ID !== 'primary' ? process.env.GOOGLE_CALENDAR_ID : null);
+    if (leave?.google_event_id && shopCalId) {
+      cancelEvent({ calendarId: shopCalId, eventId: leave.google_event_id })
         .catch(e => console.error('⚠️  Leave calendar delete:', e.message));
     }
 
@@ -814,6 +993,47 @@ router.delete('/photos/:id', requireAuth, (req, res) => {
       if (fs_api.existsSync(filepath)) fs_api.unlinkSync(filepath);
     }
     q.deletePhoto(req.params.id);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Training Videos ───────────────────────────────────────────────────────────
+
+router.get('/training/videos', requireAuth, (req, res) => {
+  try { res.json(q.getTrainingVideos()); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/training/videos', requireAuth, (req, res) => {
+  try {
+    const { base64, filename, caption } = req.body;
+    if (!base64 || !filename) return res.status(400).json({ error: 'base64 and filename required' });
+    const ext        = (filename.split('.').pop() || 'mp4').toLowerCase();
+    const uniqueName = `training-${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+    const filepath   = path_api.join(UPLOADS, uniqueName);
+    const data       = base64.includes(',') ? base64.split(',')[1] : base64;
+    fs_api.writeFileSync(filepath, Buffer.from(data, 'base64'));
+    const video = q.addTrainingVideo({ filename: uniqueName, originalName: filename, caption: caption || '' });
+    res.json({ ok: true, video });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.put('/training/videos/:id', requireAuth, (req, res) => {
+  try {
+    q.updateTrainingVideo(req.params.id, req.body);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.delete('/training/videos/:id', requireAuth, (req, res) => {
+  try {
+    const videos  = q.getTrainingVideos();
+    const video   = videos.find(v => String(v.id) === String(req.params.id));
+    if (video) {
+      const filepath = path_api.join(UPLOADS, video.filename);
+      if (fs_api.existsSync(filepath)) fs_api.unlinkSync(filepath);
+    }
+    q.deleteTrainingVideo(req.params.id);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

@@ -2,7 +2,15 @@
  * All data access functions — pure JavaScript, no SQL required.
  */
 const db              = require('./database');
-const { listEvents }  = require('../services/googleCalendar');
+
+// Maps the bot's language codes to Intl locales for date formatting.
+const DATE_LOCALES = { nl: 'nl-NL', en: 'en-US', es: 'es-ES', fr: 'fr-FR', pt: 'pt-BR' };
+
+/** Localized short date, e.g. nl → "wo 17 jun", en → "Wed, Jun 17". */
+const localeLongDate = (date, lang = 'en') => {
+  const d = date instanceof Date ? date : new Date(date);
+  return d.toLocaleDateString(DATE_LOCALES[lang] || 'en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+};
 
 // ── Settings ──────────────────────────────────────────────────────────────────
 
@@ -16,10 +24,66 @@ const setManySettings = obj     => db.settings.setMany(obj);
 const getEmployees       = ()    => db.employees.find().sort((a,b) => a.id - b.id);
 const getActiveEmployees = ()    => db.employees.find(e => e.is_active).sort((a,b) => a.id - b.id);
 const getEmployee        = id    => db.employees.findOne(e => String(e.id) === String(id));
-const createEmployee     = (name, phone, color, gcalId, excludedServiceIds) =>
-  db.employees.insert({ name, phone: phone||'', color: color||'#f59e0b', google_calendar_id: gcalId||'', is_active: 1, excluded_service_ids: excludedServiceIds||[], scan_pin: '' });
-const updateEmployee     = (id, data) =>
-  db.employees.updateById(id, { name: data.name, phone: data.phone||'', color: data.color, google_calendar_id: data.google_calendar_id||'', excluded_service_ids: data.excluded_service_ids||[], scan_pin: data.scan_pin||'' });
+/** True if another currently-active barber is already using this color (the schedule/legend only needs to disambiguate people working right now). */
+const isColorTaken = (color, excludeId) =>
+  db.employees.find(e => e.is_active && String(e.id) !== String(excludeId)).some(e => e.color === color);
+
+function _assertColorFree(color, excludeId) {
+  if (color && isColorTaken(color, excludeId)) {
+    const err = new Error('That color is already used by another active barber — pick a different one.');
+    err.code = 'COLOR_TAKEN';
+    throw err;
+  }
+}
+
+const createEmployee     = (name, phone, color, gcalId, excludedServiceIds, doesHouseCalls) => {
+  _assertColorFree(color);
+  return db.employees.insert({ name, phone: phone||'', color: color||'#f59e0b', google_calendar_id: gcalId||'', is_active: 1, excluded_service_ids: excludedServiceIds||[], scan_pin: '', does_house_calls: doesHouseCalls ? 1 : 0 });
+};
+const updateEmployee     = (id, data) => {
+  _assertColorFree(data.color, id);
+  return db.employees.updateById(id, { name: data.name, phone: data.phone||'', color: data.color, google_calendar_id: data.google_calendar_id||'', excluded_service_ids: data.excluded_service_ids||[], fixed_customer_phones: data.fixed_customer_phones||[], fallback_employee_ids: data.fallback_employee_ids||[], does_house_calls: data.does_house_calls ? 1 : 0 });
+};
+
+/** Active barbers who currently offer house calls. */
+const getHouseCallEmployees = () => getActiveEmployees().filter(e => e.does_house_calls);
+
+/**
+ * Returns the active employee whose fixed_customer_phones list contains this phone number.
+ * Normalises by stripping all non-digits before comparing.
+ *
+ * Two-pass lookup handles @lid accounts:
+ *  Pass 1 – direct digit match (works when admin entered the actual phone number and
+ *            the customer's WhatsApp sends as @c.us, e.g. "5978403686").
+ *  Pass 2 – customer-table cross-reference: find the customer record whose phones array
+ *            includes the incoming ID, then check all their known IDs against the stored
+ *            fixed_customer_phones. This lets admins enter a normal phone number even
+ *            when the customer's active session comes in via a @lid ID.
+ */
+const getBarberForPhone = (phone) => {
+  const normalise = p => String(p).replace(/\D/g, '');
+  const target    = normalise(phone);
+
+  // Pass 1: direct match
+  const direct = db.employees.findOne(e =>
+    e.is_active &&
+    Array.isArray(e.fixed_customer_phones) &&
+    e.fixed_customer_phones.some(p => normalise(p) === target)
+  );
+  if (direct) return direct;
+
+  // Pass 2: look up all IDs for this customer and try each one
+  const customer = db.customers.findOne(c =>
+    Array.isArray(c.phones) && c.phones.some(p => normalise(p) === target)
+  );
+  if (!customer) return null;
+  const allIds = (customer.phones || []).map(normalise);
+  return db.employees.findOne(e =>
+    e.is_active &&
+    Array.isArray(e.fixed_customer_phones) &&
+    e.fixed_customer_phones.some(p => allIds.includes(normalise(p)))
+  ) || null;
+};
 
 /** Returns active employees who can perform the given service.
  *  Uses excluded_service_ids — if the service is NOT in the exclusion list, the employee can do it.
@@ -28,6 +92,28 @@ const getEmployeesForService = (serviceId) =>
   db.employees.find(e => e.is_active && !e.excluded_service_ids?.includes(serviceId))
     .sort((a, b) => a.id - b.id);
 const toggleEmployee     = id   => db.employees.toggle(id, 'is_active');
+
+/**
+ * Permanently removes an employee. Appointments only store employee_id and
+ * resolve the barber's name/color live (see _joinEmployee) — so before the
+ * employee record disappears, their name/color is frozen onto every
+ * appointment that references them (employee_name/employee_color), which
+ * _joinEmployee falls back to once the live lookup misses. Past bookings
+ * keep showing the right barber; only the live employee record is gone.
+ */
+function deleteEmployee(id) {
+  const emp = db.employees.findOne(e => String(e.id) === String(id));
+  if (!emp) return { changes: 0 };
+
+  db.appointments.find(a => String(a.employee_id) === String(id)).forEach(a =>
+    db.appointments.updateById(a.id, { employee_name: emp.name, employee_color: emp.color })
+  );
+
+  db.businessHours.remove(r => String(r.employee_id) === String(id));
+  db.leaves.remove(l => String(l.employee_id) === String(id));
+  db.blockedDates.remove(b => String(b.employee_id) === String(id));
+  return db.employees.removeById(id);
+}
 
 /**
  * Returns true if the employee has an "away today" all-day block for today.
@@ -113,6 +199,36 @@ function setWeeklyHours(employeeId, hoursArray) {
   }
 }
 
+// House calls run on their own weekly schedule (Settings → House Calls),
+// stored as a single JSON setting rather than in businessHours — it's not
+// per-barber (only one schedule for the whole house-call offering) and is
+// deliberately independent of any barber's in-shop hours, so a shop that's
+// closed Sundays can still offer house calls then if configured to.
+function getHouseCallHoursForDay(dayOfWeek) {
+  let hours;
+  try { hours = JSON.parse(getSetting('house_call_hours') || '[]'); } catch (_) { hours = []; }
+  const h = hours.find(r => r.day_of_week === dayOfWeek);
+  return h?.is_open ? h : null;
+}
+
+function getHouseCallWeeklyHours() {
+  let hours;
+  try { hours = JSON.parse(getSetting('house_call_hours') || '[]'); } catch (_) { hours = []; }
+  return Array.from({ length: 7 }, (_, dow) =>
+    hours.find(r => r.day_of_week === dow) || { day_of_week: dow, is_open: 0, open_time: '09:00', close_time: '18:00' }
+  );
+}
+
+function setHouseCallWeeklyHours(hoursArray) {
+  const rows = hoursArray.map(h => ({
+    day_of_week: h.day_of_week,
+    is_open:     h.is_open ? 1 : 0,
+    open_time:   h.open_time,
+    close_time:  h.close_time,
+  }));
+  setSetting('house_call_hours', JSON.stringify(rows));
+}
+
 // ── Services ──────────────────────────────────────────────────────────────────
 
 const getActiveServices = () => db.services.find(s => s.is_active).sort((a,b) => a.sort_order - b.sort_order);
@@ -120,11 +236,15 @@ const getAllServices     = () => db.services.find().sort((a,b) => a.sort_order -
 const getService        = id => db.services.findOne(s => String(s.id) === String(id));
 
 function upsertService(s) {
+  // A stray leading/trailing space in the name breaks WhatsApp's *bold*
+  // formatting (it requires no whitespace right inside the asterisks), so
+  // trim it here rather than relying on the dashboard input to catch it.
+  const name = (s.name || '').trim();
   const existing = db.services.findOne(r => String(r.id) === String(s.id));
   if (existing) {
-    db.services.updateById(s.id, { name: s.name, emoji: s.emoji||'', description: s.description||'', duration: +s.duration, price: +s.price, is_active: s.is_active??1, sort_order: s.sort_order??0 });
+    db.services.updateById(s.id, { name, emoji: s.emoji||'', description: s.description||'', duration: +s.duration, price: +s.price, is_active: s.is_active??1, sort_order: s.sort_order??0 });
   } else {
-    db.services.insert({ ...s, duration: +s.duration, price: +s.price, is_active: s.is_active??1, sort_order: s.sort_order??0 });
+    db.services.insert({ ...s, name, duration: +s.duration, price: +s.price, is_active: s.is_active??1, sort_order: s.sort_order??0 });
   }
 }
 
@@ -142,12 +262,18 @@ const setManyMessages = obj => Object.entries(obj).forEach(([k,v]) => setBotMess
 
 function _joinEmployee(appt) {
   const emp = db.employees.findOne(e => e.id === appt.employee_id);
-  return { ...appt, employee_name: emp?.name || null, employee_color: emp?.color || null };
+  // Falls back to the appointment's own frozen employee_name/employee_color
+  // (set by deleteEmployee() below) once the barber no longer has a live record.
+  return {
+    ...appt,
+    employee_name:  emp?.name  || appt.employee_name  || null,
+    employee_color: emp?.color || appt.employee_color || null,
+  };
 }
 
 function getAppointments({ date, employeeId, status, limit = 200 } = {}) {
   let results = db.appointments.find();
-  if (date)       results = results.filter(a => (a.start_time || '').startsWith(date));
+  if (date)       results = results.filter(a => a.start_time && _dateStr(new Date(a.start_time)) === date);
   if (employeeId) results = results.filter(a => String(a.employee_id) === String(employeeId));
   if (status)     results = results.filter(a => a.status === status);
   results.sort((a,b) => (b.start_time||'').localeCompare(a.start_time||''));
@@ -157,7 +283,7 @@ function getAppointments({ date, employeeId, status, limit = 200 } = {}) {
 function getTodayAppointments() {
   const today = _dateStr(new Date());
   return db.appointments
-    .find(a => (a.start_time||'').startsWith(today) && a.status !== 'cancelled')
+    .find(a => a.start_time && _dateStr(new Date(a.start_time)) === today && a.status !== 'cancelled')
     .sort((a,b) => (a.start_time||'').localeCompare(b.start_time||''))
     .map(_joinEmployee);
 }
@@ -168,7 +294,7 @@ function getDashboardStats() {
   const now     = new Date().toISOString();
   const all     = db.appointments.find();
 
-  const todayAppts = all.filter(a => (a.start_time||'').startsWith(today));
+  const todayAppts = all.filter(a => a.start_time && _dateStr(new Date(a.start_time)) === today);
 
   return {
     today:     todayAppts.filter(a => a.status !== 'cancelled').length,
@@ -200,10 +326,51 @@ function generateBookingCode() {
   return code;
 }
 
+// If Chrome wedges mid-reply (see whatsapp-client.js wedge detector) the
+// customer never sees a confirmation, assumes the booking failed, and retries
+// the same slot — after the DB write already succeeded. Suppress an exact
+// repeat (same phone + name + service + slot) made within this window instead
+// of silently creating a second appointment.
+const DUPLICATE_BOOKING_WINDOW_MS = 5 * 60 * 1000;
+
 function createAppointment(data) {
+  const startIso = data.start_time instanceof Date ? data.start_time.toISOString() : data.start_time;
+  const endIso   = data.end_time   instanceof Date ? data.end_time.toISOString()   : data.end_time;
+
+  const dup = db.appointments.findOne(a =>
+    a.status         !== 'cancelled' &&
+    a.customer_phone === data.customer_phone &&
+    a.customer_name  === data.customer_name &&
+    a.service_id     === data.service_id &&
+    a.start_time     === startIso &&
+    (Date.now() - new Date(a.created_at).getTime()) < DUPLICATE_BOOKING_WINDOW_MS
+  );
+  if (dup) {
+    console.warn(`⚠️  Duplicate booking suppressed for ${data.customer_name} (${data.customer_phone}) @ ${startIso} — reusing ${dup.booking_code}`);
+    return { lastInsertRowid: dup.id, changes: 0, booking_code: dup.booking_code, duplicate: true };
+  }
+
+  // Authoritative overlap guard. getAvailableSlotsForEmployee() is only a
+  // pre-filter — two different customers can both read it as "free" before
+  // either has written (e.g. both picking the same slot within seconds).
+  // This check + the insert below have no `await` between them, so it's the
+  // actual serialization point that stops a double-booking from landing.
+  if (data.employee_id) {
+    const clash = db.appointments.findOne(a =>
+      a.status !== 'cancelled' &&
+      String(a.employee_id) === String(data.employee_id) &&
+      a.start_time < endIso && startIso < a.end_time
+    );
+    if (clash) {
+      console.warn(`⚠️  Slot clash refused: employee ${data.employee_id} already booked ${clash.booking_code} @ ${clash.start_time}`);
+      return { clash: true, clashBookingCode: clash.booking_code };
+    }
+  }
+
   const booking_code = generateBookingCode();
   const result = db.appointments.insert({
     booking_code,                              // ← unique 4-char code shown everywhere
+    booking_group:    data.booking_group || '',// ← links appointments made in one group/family booking
     employee_id:      data.employee_id || null,
     customer_name:    data.customer_name,
     customer_phone:   data.customer_phone,     // ← stored in JSON only, never shown in UI
@@ -212,13 +379,19 @@ function createAppointment(data) {
     service_emoji:    data.service_emoji || '',
     service_duration: +data.service_duration,
     service_price:    +data.service_price,
-    start_time:       data.start_time instanceof Date ? data.start_time.toISOString() : data.start_time,
-    end_time:         data.end_time   instanceof Date ? data.end_time.toISOString()   : data.end_time,
+    start_time:       startIso,
+    end_time:         endIso,
     google_event_id:   data.google_event_id  || '',
     google_event_link: data.google_event_link || '',
     status:           data.status || 'confirmed',
     notes:            data.notes || '',
     reminder_sent:    0,
+    is_house_call:          data.is_house_call ? 1 : 0,
+    house_call_lat:         data.house_call_lat ?? null,
+    house_call_lng:         data.house_call_lng ?? null,
+    house_call_address:     data.house_call_address || '',
+    house_call_distance_km: data.house_call_distance_km ?? null,
+    house_call_fee:         data.house_call_fee ?? 0,
   });
   // Return the code alongside the insert result so callers can show it
   return { ...result, booking_code };
@@ -227,6 +400,39 @@ function createAppointment(data) {
 /** Look up an appointment by its 4-char booking code (case-insensitive). */
 const getAppointmentByCode = (code) =>
   db.appointments.findOne(a => a.booking_code === code.trim().toUpperCase());
+
+/**
+ * All still-cancellable (confirmed) appointments that belong to one group booking.
+ * Returns [] for empty/missing groupId so single bookings never match.
+ */
+const getActiveGroupAppointments = (groupId) =>
+  groupId
+    ? db.appointments.find(a => a.booking_group === groupId && a.status === 'confirmed')
+    : [];
+
+/**
+ * Fallback grouping for bookings made before booking_group existed:
+ * all still-confirmed appointments for the same phone on the same calendar day.
+ * Includes the given appointment itself.
+ */
+const getActiveSiblingAppointments = (appt) => {
+  if (!appt || !appt.customer_phone) return [];
+  const day = (appt.start_time || '').slice(0, 10);
+  return db.appointments.find(a =>
+    a.customer_phone === appt.customer_phone &&
+    a.status === 'confirmed' &&
+    (a.start_time || '').slice(0, 10) === day
+  );
+};
+
+/** A customer's upcoming confirmed appointments, earliest first. */
+const getUpcomingAppointmentsByPhone = (phone) => {
+  const now = Date.now();
+  return db.appointments
+    .find(a => a.customer_phone === phone && a.status === 'confirmed' && new Date(a.start_time).getTime() >= now)
+    .slice()
+    .sort((x, y) => new Date(x.start_time) - new Date(y.start_time));
+};
 
 /** Look up an appointment by its numeric ID. */
 const getAppointmentById = (id) =>
@@ -329,6 +535,12 @@ function getOrCreateCustomer(name, phone) {
   return getCustomerByPhone(phone);
 }
 
+/** Save the customer's preferred language on their profile. */
+function saveCustomerLanguage(phone, lang) {
+  const customer = getCustomerByPhone(phone);
+  if (customer) db.customers.updateById(customer.id, { preferred_lang: lang });
+}
+
 /** Add an extra phone number to an existing customer (for linked accounts). */
 function addPhoneToCustomer(id, phone) {
   const customer = db.customers.findOne(c => String(c.id) === String(id));
@@ -358,6 +570,27 @@ const unblockCustomer = (id) =>
 const updateCustomer  = (id, data) =>
   db.customers.updateById(id, data);
 
+/** Permanently delete a customer record. */
+const deleteCustomer  = (id) =>
+  db.customers.removeById(id);
+
+// ── Keywords ──────────────────────────────────────────────────────────────────
+
+const getKeywords    = ()       => db.keywords.find().sort((a, b) => a.action.localeCompare(b.action) || a.keyword.localeCompare(b.keyword));
+const addKeyword     = (data)   => db.keywords.insert({ keyword: (data.keyword||'').toLowerCase().trim(), action: data.action, enabled: 1 });
+const updateKeyword  = (id, data) => db.keywords.updateById(id, { keyword: (data.keyword||'').toLowerCase().trim(), action: data.action, enabled: data.enabled ?? 1 });
+const deleteKeyword  = (id)     => db.keywords.removeById(id);
+const matchKeyword   = (text)   => db.keywords.findOne(k => k.enabled && k.keyword === text.trim().toLowerCase());
+
+/** Return all appointments belonging to a customer (matched by phones array). */
+function getAppointmentsForCustomer(customerId) {
+  const customer = db.customers.findOne(c => String(c.id) === String(customerId));
+  if (!customer) return [];
+  const norm = p => String(p).replace(/\D/g, '');
+  const phones = new Set((customer.phones || []).map(norm));
+  return getAppointments({}).filter(a => phones.has(norm(a.customer_phone || '')));
+}
+
 /**
  * Returns true if a given phone number belongs to a blocked customer.
  * Used in the bot entry point to silently drop messages.
@@ -366,52 +599,6 @@ const isPhoneBlocked = (phone) => {
   const c = getCustomerByPhone(phone);
   return c?.is_blocked === 1;
 };
-
-// ── Customer-specific pricing ─────────────────────────────────────────────────
-
-/**
- * Returns every special price configured, joined with the customer's name and
- * the service's name/standard price (for display).
- */
-function getCustomerPrices() {
-  return db.customerPrices.find()
-    .map(r => {
-      const customer = db.customers.findOne(c => String(c.id) === String(r.customer_id));
-      const service  = db.services.findOne(s => String(s.id) === String(r.service_id));
-      return {
-        ...r,
-        customer_name:  customer?.name || '(unknown customer)',
-        service_name:   service?.name  || '(unknown service)',
-        standard_price: service ? +service.price : null,
-      };
-    })
-    .sort((a, b) => a.customer_name.localeCompare(b.customer_name) || a.service_name.localeCompare(b.service_name));
-}
-
-/** Create or update the special price for one customer+service combo. */
-function setCustomerPrice({ customerId, serviceId, price }) {
-  return db.customerPrices.upsert(
-    r => String(r.customer_id) === String(customerId) && String(r.service_id) === String(serviceId),
-    { customer_id: +customerId, service_id: serviceId, price: +price }
-  );
-}
-
-const deleteCustomerPrice = (id) => db.customerPrices.removeById(id);
-
-/**
- * Returns the special price (a number) set for this customer+service, or null
- * if none is configured. Used by the bot to override the standard service
- * price when a customer with a special price books that service.
- */
-function getSpecialPrice(customerPhone, serviceId) {
-  const customer = getCustomerByPhone(customerPhone);
-  if (!customer) return null;
-  const row = db.customerPrices.findOne(r =>
-    String(r.customer_id) === String(customer.id) &&
-    String(r.service_id)  === String(serviceId)
-  );
-  return row ? +row.price : null;
-}
 
 // ── Blocked dates / time-off ──────────────────────────────────────────────────
 
@@ -504,9 +691,9 @@ function _generateSlots(baseDate, openTime, closeTime, serviceDuration, interval
   return slots;
 }
 
-async function getAvailableSlotsForEmployee(employee, date, serviceDuration, { excludeId } = {}) {
+async function getAvailableSlotsForEmployee(employee, date, serviceDuration, { excludeId, isHouseCall } = {}) {
   const dayOfWeek = date.getDay();
-  const hours     = getHoursForDay(employee.id, dayOfWeek);
+  const hours     = isHouseCall ? getHouseCallHoursForDay(dayOfWeek) : getHoursForDay(employee.id, dayOfWeek);
   if (!hours) return [];
 
   // Employee on approved leave → no slots
@@ -518,7 +705,7 @@ async function getAvailableSlotsForEmployee(employee, date, serviceDuration, { e
 
   // ── Local DB conflicts ────────────────────────────────────────────────────────
   const booked = db.appointments.find(a =>
-    (a.start_time||'').startsWith(dateStr) &&
+    a.start_time && _dateStr(new Date(a.start_time)) === dateStr &&
     String(a.employee_id) === String(employee.id) &&
     a.status !== 'cancelled' &&
     (!excludeId || String(a.id) !== String(excludeId))   // skip the appt being rescheduled
@@ -532,15 +719,10 @@ async function getAvailableSlotsForEmployee(employee, date, serviceDuration, { e
   if (db.blockedDates.findOne(b => b.date === dateStr && String(b.employee_id) === String(employee.id) && b.all_day))
     return [];
 
-  // ── Google Calendar conflicts (personal blocks on the barber's own calendar) ──
-  // IMPORTANT: only use the employee's OWN calendar here — never the shop-wide
-  // fallback. The shop calendar holds every barber's appointments mixed together,
-  // so querying it per-employee would block all barbers whenever any one of them
-  // is booked. The DB check above already handles per-barber conflicts correctly;
-  // the calendar check exists only to catch personal blocks the barber adds
-  // manually (days off, personal appointments, etc.).
-  const calId     = employee.google_calendar_id || null;
-  const calEvents = calId ? await listEvents(calId, dateStr) : [];
+  // ── No Google Calendar read here ──────────────────────────────────────────────
+  // An employee's google_calendar_id is the barber's email, used solely to share
+  // the shop calendar with them (read-only). Their personal calendars are never
+  // queried — availability comes from the DB plus the blocked-date checks above.
 
   // ── Partial time blocks (shop-wide or barber-specific) ───────────────────────
   const timeBlocks = db.blockedDates.find(b =>
@@ -558,17 +740,20 @@ async function getAvailableSlotsForEmployee(employee, date, serviceDuration, { e
   // ── Merge and filter ──────────────────────────────────────────────────────────
   const busy = [
     ...booked.map(b => ({ start: new Date(b.start_time), end: new Date(b.end_time) })),
-    ...calEvents,
     ...timeBlocks,
   ];
 
-  return allSlots.filter(slot => !busy.some(b => slot.start < b.end && slot.end > b.start));
+  const now = new Date();
+  return allSlots.filter(slot =>
+    slot.start > now &&
+    !busy.some(b => slot.start < b.end && slot.end > b.start)
+  );
 }
 
-async function getAvailableSlotsForAny(employees, date, serviceDuration) {
+async function getAvailableSlotsForAny(employees, date, serviceDuration, { isHouseCall } = {}) {
   const map = new Map();
   for (const emp of employees) {
-    for (const slot of await getAvailableSlotsForEmployee(emp, date, serviceDuration)) {
+    for (const slot of await getAvailableSlotsForEmployee(emp, date, serviceDuration, { isHouseCall })) {
       if (map.has(slot.time)) {
         map.get(slot.time).availableEmployees.push(emp.id);
       } else {
@@ -633,11 +818,353 @@ async function getAvailableSlotsForGroup(employees, date, duration, groupSize) {
   });
 }
 
+/**
+ * Multi-service parallel slot finder.
+ * persons = [{ service: { id, duration } }, ...]
+ * employees = all active employees (union across services)
+ *
+ * For each 30-min start time T, tries to assign each person to a distinct barber
+ * who is free at T for that person's service duration.
+ * Uses greedy: assign the person with fewest available barbers first.
+ *
+ * Returns slots with assignments: [{ personIdx, employeeId, start, end }, ...]
+ */
+async function getAvailableSlotsForParallelGroup(persons, employees, date) {
+  const dateStr = _dateStr(date);
+
+  // Build appointment count per employee on this date (for fair-share sorting)
+  const apptCount = new Map();
+  for (const emp of employees) {
+    apptCount.set(emp.id, db.appointments.count(a =>
+      a.start_time && _dateStr(new Date(a.start_time)) === dateStr &&
+      String(a.employee_id) === String(emp.id) &&
+      a.status !== 'cancelled'
+    ));
+  }
+
+  // For each employee × service, get free slots
+  const slotCache = new Map(); // `${empId}-${duration}` → Set of timeKeys
+  const slotObjects = new Map(); // timeKey → slot object (start/end/display)
+  for (const emp of employees) {
+    const durations = [...new Set(persons.map(p => p.service.duration))];
+    for (const dur of durations) {
+      const slots = await getAvailableSlotsForEmployee(emp, date, dur);
+      const key = `${emp.id}-${dur}`;
+      slotCache.set(key, new Set(slots.map(s => s.time)));
+      for (const s of slots) {
+        if (!slotObjects.has(`${s.time}-${dur}`)) slotObjects.set(`${s.time}-${dur}`, s);
+      }
+    }
+  }
+
+  // Collect all candidate times
+  const allTimes = new Set();
+  for (const [, timeSet] of slotCache) for (const t of timeSet) allTimes.add(t);
+  const sortedTimes = [...allTimes].sort();
+
+  const results = [];
+  for (const timeKey of sortedTimes) {
+    // For each person, find which employees are free — sorted least busy first
+    const options = persons.map((p, idx) => ({
+      personIdx: idx,
+      duration: p.service.duration,
+      freeEmployees: employees
+        .filter(e => slotCache.get(`${e.id}-${p.service.duration}`)?.has(timeKey))
+        .sort((a, b) => (apptCount.get(a.id) || 0) - (apptCount.get(b.id) || 0))
+        .map(e => e.id),
+    }));
+
+    // Greedy assignment: most constrained (fewest options) first
+    const sorted = [...options].sort((a, b) => a.freeEmployees.length - b.freeEmployees.length);
+    const used = new Set();
+    const assignment = [];
+    let valid = true;
+
+    for (const opt of sorted) {
+      const chosen = opt.freeEmployees.find(id => !used.has(id));
+      if (!chosen) { valid = false; break; }
+      used.add(chosen);
+      const slotObj = slotObjects.get(`${timeKey}-${opt.duration}`);
+      assignment.push({ personIdx: opt.personIdx, employeeId: chosen, start: slotObj.start, end: slotObj.end, display: slotObj.display });
+    }
+
+    if (valid) {
+      results.push({ time: timeKey, display: assignment[0].display, start: assignment[0].start, isParallel: true, assignments: assignment });
+    }
+  }
+  return results;
+}
+
+/**
+ * Multi-service sequential slot finder.
+ * Chains persons one after another: person 1 at T, person 2 at T+dur1, etc.
+ * Each person gets any available barber at their slot time.
+ *
+ * Returns slots with assignments: [{ personIdx, employeeId, start, end }, ...]
+ */
+async function getAvailableSlotsForSequentialGroup(persons, employees, date) {
+  // Get all slots per employee (using smallest duration for initial enumeration)
+  const minDur = Math.min(...persons.map(p => p.service.duration));
+  const slotsByEmp = await Promise.all(employees.map(e => getAvailableSlotsForEmployee(e, date, minDur)));
+
+  // Collect all candidate start times
+  const allTimes = new Set();
+  slotsByEmp.forEach(slots => slots.forEach(s => allTimes.add(s.time)));
+  const sortedTimes = [...allTimes].sort();
+
+  // For each employee, build a set of slots keyed by duration for quick lookup
+  const empSlotsByDur = new Map(); // empId → Map(duration → Map(timeKey → slot))
+  for (let i = 0; i < employees.length; i++) {
+    const emp = employees[i];
+    empSlotsByDur.set(emp.id, new Map());
+    const durations = [...new Set(persons.map(p => p.service.duration))];
+    for (const dur of durations) {
+      const slots = await getAvailableSlotsForEmployee(emp, date, dur);
+      empSlotsByDur.get(emp.id).set(dur, new Map(slots.map(s => [s.time, s])));
+    }
+  }
+
+  // Helper: format a Date to HH:MM time key
+  function toTimeKey(d) {
+    return d.toTimeString().slice(0, 5);
+  }
+
+  const results = [];
+  for (const startTime of sortedTimes) {
+    const assignment = [];
+    let valid = true;
+    let currentTime = null; // will be set from actual slot start
+
+    for (let idx = 0; idx < persons.length; idx++) {
+      const dur = persons[idx].service.duration;
+      const tKey = idx === 0 ? startTime : toTimeKey(currentTime);
+
+      // Find any available employee at this time for this duration
+      let chosen = null;
+      let chosenSlot = null;
+      for (const emp of employees) {
+        const slotMap = empSlotsByDur.get(emp.id)?.get(dur);
+        if (slotMap?.has(tKey) && !assignment.some(a => {
+          // Barber is busy if their slot overlaps with this one
+          const s = slotMap.get(tKey);
+          return String(a.employeeId) === String(emp.id) && a.start < s.end && a.end > s.start;
+        })) {
+          chosen = emp.id;
+          chosenSlot = slotMap.get(tKey);
+          break;
+        }
+      }
+
+      if (!chosen) { valid = false; break; }
+      assignment.push({ personIdx: idx, employeeId: chosen, start: chosenSlot.start, end: chosenSlot.end, display: chosenSlot.display });
+      currentTime = chosenSlot.end; // next person starts when this one finishes
+    }
+
+    if (valid) {
+      results.push({ time: startTime, display: assignment[0].display, start: assignment[0].start, isParallel: false, assignments: assignment });
+    }
+  }
+  return results;
+}
+
+/**
+ * Batched slot finder: fills up to employees.length persons in parallel per wave,
+ * then chains the next wave after the first wave finishes.
+ * e.g. 4 people + 3 barbers → wave 1: persons 0-2 at T, wave 2: person 3 at T + max_wave1_duration
+ *
+ * Returns slots with assignments covering all persons.
+ */
+async function getAvailableSlotsForBatchGroup(persons, employees, date) {
+  const dateStr = _dateStr(date);
+
+  // Only barbers actually working this day take part. Otherwise, on a day where
+  // one barber is off (e.g. melly on Sundays), a group of 3+ would wrongly require
+  // everyone in a single parallel wave and find nothing — instead of filling the
+  // available barbers in parallel and scheduling the rest right after.
+  const dow = date.getDay();
+  const working = employees.filter(e =>
+    getHoursForDay(e.id, dow) &&
+    !db.blockedDates.findOne(b => b.date === dateStr && String(b.employee_id) === String(e.id) && b.all_day) &&
+    !isEmployeeOnLeave(e.id, dateStr)
+  );
+  if (working.length) employees = working;
+
+  const batchSize = employees.length;
+
+  // Build appointment count per employee for fair-share tie-breaking
+  const apptCount = new Map();
+  for (const emp of employees) {
+    apptCount.set(emp.id, db.appointments.count(a =>
+      a.start_time && _dateStr(new Date(a.start_time)) === dateStr &&
+      String(a.employee_id) === String(emp.id) &&
+      a.status !== 'cancelled'
+    ));
+  }
+
+  // Split persons into batches
+  const batches = [];
+  for (let i = 0; i < persons.length; i += batchSize) {
+    batches.push({ persons: persons.slice(i, i + batchSize), startIdx: i });
+  }
+
+  // Find parallel slots for the first batch
+  const batch0Slots = await getAvailableSlotsForParallelGroup(batches[0].persons, employees, date);
+  if (batch0Slots.length === 0) return [];
+
+  // Helper: format a timestamp to display string
+  function fmtDisplay(ms) {
+    const d = new Date(ms);
+    const h = d.getHours(), m = d.getMinutes();
+    const p = h >= 12 ? 'PM' : 'AM';
+    const hr = h > 12 ? h - 12 : h === 0 ? 12 : h;
+    return `${hr}:${String(m).padStart(2, '0')} ${p}`;
+  }
+
+  const results = [];
+
+  // Real per-employee availability (respects existing bookings, business
+  // hours, blocked dates/leave) for every duration any person needs — the
+  // stacking loop below must land remaining people on one of these, never on
+  // a bare "previous person's end time" arithmetic guess. That guess doesn't
+  // know a *different* appointment (made through any other flow) already
+  // sits there, or that it's past closing time — it would just stack the
+  // next person on top of it, the write gets rejected by the overlap guard,
+  // and (worst case, e.g. only one barber working that day) the exact same
+  // wrong guess repeats on every retry with no way to ever succeed.
+  const durations = [...new Set(persons.map(p => p.service.duration))];
+  const realSlotsByEmpDur = new Map(); // empId → dur → sorted [{startMs, endMs}]
+  for (const emp of employees) {
+    const byDur = new Map();
+    for (const dur of durations) {
+      const slots = await getAvailableSlotsForEmployee(emp, date, dur);
+      byDur.set(dur, slots
+        .map(s => ({ startMs: s.start.getTime(), endMs: s.end.getTime() }))
+        .sort((a, b) => a.startMs - b.startMs));
+    }
+    realSlotsByEmpDur.set(emp.id, byDur);
+  }
+
+  for (const slot of batch0Slots) {
+    const allAssignments = slot.assignments.map(a => ({ ...a }));
+
+    // Track when each barber becomes free after wave 1
+    const barberFreeAt = new Map();
+    for (const a of slot.assignments) {
+      barberFreeAt.set(a.employeeId, new Date(a.end).getTime());
+    }
+    // Any barber not used in wave 1 is free from the slot start
+    for (const emp of employees) {
+      if (!barberFreeAt.has(emp.id)) barberFreeAt.set(emp.id, new Date(slot.start).getTime());
+    }
+
+    let valid = true;
+
+    // Assign remaining persons one by one to the earliest-free barber
+    const remainingPersons = [];
+    for (let b = 1; b < batches.length; b++) {
+      const batch = batches[b];
+      for (let p = 0; p < batch.persons.length; p++) {
+        remainingPersons.push({ person: batch.persons[p], personIdx: batch.startIdx + p });
+      }
+    }
+
+    for (const { person, personIdx } of remainingPersons) {
+      const dur = person.service.duration;
+
+      // Among all barbers, take the earliest REAL slot at/after when they
+      // become free — not "free time + duration", which could land past
+      // closing or on an appointment this stacking has no visibility into.
+      let bestEmpId = null, bestStart = Infinity, bestEnd = null, bestCount = Infinity;
+      for (const [empId, freeAt] of barberFreeAt) {
+        const next = (realSlotsByEmpDur.get(empId)?.get(dur) || []).find(c => c.startMs >= freeAt);
+        if (!next) continue;
+        const cnt = apptCount.get(empId) || 0;
+        if (next.startMs < bestStart || (next.startMs === bestStart && cnt < bestCount)) {
+          bestEmpId = empId; bestStart = next.startMs; bestEnd = next.endMs; bestCount = cnt;
+        }
+      }
+
+      if (bestEmpId == null) { valid = false; break; }
+
+      barberFreeAt.set(bestEmpId, bestEnd); // barber is now busy until bestEnd
+
+      allAssignments.push({
+        personIdx,
+        employeeId: bestEmpId,
+        start:   new Date(bestStart).toISOString(),
+        end:     new Date(bestEnd).toISOString(),
+        display: fmtDisplay(bestStart),
+      });
+    }
+
+    if (valid) {
+      results.push({
+        time:        slot.time,
+        display:     slot.display,
+        start:       slot.start,
+        isParallel:  true,
+        isBatched:   batches.length > 1,
+        assignments: allAssignments,
+      });
+    }
+  }
+
+  return results;
+}
+
+// ── House calls (home visits) ────────────────────────────────────────────────
+
+/** Shop's own coordinates, or null if not yet configured in Settings. */
+function getShopCoordinates() {
+  const lat = parseFloat(getSetting('shop_latitude'));
+  const lng = parseFloat(getSetting('shop_longitude'));
+  return (Number.isFinite(lat) && Number.isFinite(lng)) ? { lat, lng } : null;
+}
+
+/**
+ * Given a straight-line distance in km, returns the house-call fee and extra
+ * appointment minutes (travel time) per the admin's configured settings.
+ * `withinRange` is false beyond house_call_max_km — the caller should refuse
+ * the booking in that case rather than use fee/extraMinutes.
+ */
+function calculateHouseCallPricing(distanceKm) {
+  const maxKm = parseFloat(getSetting('house_call_max_km')) || 15;
+  if (distanceKm > maxKm) return { withinRange: false, fee: 0, extraMinutes: 0 };
+
+  const mode = getSetting('house_call_pricing_mode') || 'formula';
+  let fee = 0;
+
+  if (mode === 'tiers') {
+    let tiers = [];
+    try { tiers = JSON.parse(getSetting('house_call_tiers') || '[]'); } catch (_) { tiers = []; }
+    tiers = tiers.slice().sort((a, b) => a.upTo - b.upTo);
+    const tier = tiers.find(t => distanceKm <= t.upTo);
+    fee = tier ? (+tier.fee || 0) : (+tiers[tiers.length - 1]?.fee || 0);
+  } else {
+    // The base fee covers the included distance outright (e.g. "first 3 km =
+    // SRD 800") — it is not a free radius, so it always applies once a house
+    // call happens, with per-km charged only for distance beyond it.
+    const includedKm = parseFloat(getSetting('house_call_free_km'))     || 0;
+    const baseFee    = parseFloat(getSetting('house_call_base_fee'))    || 0;
+    const perKmFee    = parseFloat(getSetting('house_call_per_km_fee')) || 0;
+    fee = baseFee + Math.max(0, distanceKm - includedKm) * perKmFee;
+  }
+
+  // The barber has to drive back to the shop (or their next appointment)
+  // afterwards too — the calendar block has to cover both legs, not just the
+  // trip out, or the next slot would start while they're still on the road.
+  const bufferMin = parseFloat(getSetting('house_call_travel_buffer_minutes'))  || 0;
+  const perKmMin  = parseFloat(getSetting('house_call_travel_minutes_per_km'))  || 0;
+  const extraMinutes = Math.round(bufferMin + (distanceKm * 2) * perKmMin);
+
+  return { withinRange: true, fee: Math.round(fee), extraMinutes };
+}
+
 function pickLeastBusyEmployee(employeeIds, dateStr) {
   const counts = employeeIds.map(id => ({
     id,
     count: db.appointments.count(a =>
-      (a.start_time||'').startsWith(dateStr) &&
+      a.start_time && _dateStr(new Date(a.start_time)) === dateStr &&
       String(a.employee_id) === String(id) &&
       a.status !== 'cancelled'
     ),
@@ -646,11 +1173,11 @@ function pickLeastBusyEmployee(employeeIds, dateStr) {
   return counts[0].id;
 }
 
-function getAvailableDates(employees, daysAhead, limit = 20) {
+function getAvailableDates(employees, lang = 'en', daysAhead, limit = 20, isHouseCall = false) {
   const ahead = daysAhead || parseInt(getSetting('booking_days_ahead')) || 20;
   const dates = [];
   const today = new Date();
-  for (let i = 1; i <= ahead && dates.length < limit; i++) {
+  for (let i = 0; i <= ahead && dates.length < limit; i++) {
     const d = new Date(today);
     d.setDate(today.getDate() + i);
     d.setHours(0, 0, 0, 0);
@@ -661,9 +1188,26 @@ function getAvailableDates(employees, daysAhead, limit = 20) {
     if (db.blockedDates.findOne(b => b.date === dateStr && b.employee_id === null && b.all_day))
       continue;
 
+    // House calls run on their own weekly schedule (Settings → House Calls),
+    // independent of any barber's in-shop hours — a barber's own hours don't
+    // gate the day here, only their leave/blocked status does.
+    if (isHouseCall) {
+      if (!getHouseCallHoursForDay(dow)) continue;
+      const anyOpen = employees.length === 0 || employees.some(e =>
+        !db.blockedDates.findOne(b => b.date === dateStr && String(b.employee_id) === String(e.id) && b.all_day) &&
+        !isEmployeeOnLeave(e.id, dateStr)
+      );
+      if (anyOpen) dates.push({ date: d, dayOfWeek: dow, fullDisplay: localeLongDate(d, lang) });
+      continue;
+    }
+
+    // Global shop closed for this day-of-week → always skip, regardless of employee hours
+    const globalHours = getHoursForDay(null, dow);
+    if (!globalHours) continue;
+
     // At least one employee must have open hours AND not be blocked/on-leave all day
     const anyOpen = employees.length === 0
-      ? !!getHoursForDay(null, dow)
+      ? true  // global hours already confirmed open above
       : employees.some(e =>
           !!getHoursForDay(e.id, dow) &&
           !db.blockedDates.findOne(b => b.date === dateStr && String(b.employee_id) === String(e.id) && b.all_day) &&
@@ -673,7 +1217,7 @@ function getAvailableDates(employees, daysAhead, limit = 20) {
       dates.push({
         date: d,
         dayOfWeek: dow,
-        fullDisplay: d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }),
+        fullDisplay: localeLongDate(d, lang),
       });
     }
   }
@@ -705,6 +1249,20 @@ const updatePhoto    = (id, data) => db.photos.updateById(id, {
 });
 
 const deletePhoto    = (id) => db.photos.removeById(id);
+
+// ── Training Videos ───────────────────────────────────────────────────────────
+
+const getTrainingVideos  = () => db.trainingVideos.find().sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+const addTrainingVideo   = (data) => db.trainingVideos.insert({
+  filename:     data.filename,
+  originalName: data.originalName || data.filename,
+  caption:      data.caption || '',
+  sort_order:   db.trainingVideos.count(),
+});
+const updateTrainingVideo = (id, data) => db.trainingVideos.updateById(id, {
+  caption: data.caption || '',
+});
+const deleteTrainingVideo = (id) => db.trainingVideos.removeById(id);
 
 // ── Surinamese Public Holidays ────────────────────────────────────────────────
 
@@ -818,7 +1376,10 @@ function syncSurinameseHolidays(year) {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function _pad(n)        { return String(n).padStart(2, '0'); }
-function _dateStr(date) { return date.toISOString().split('T')[0]; }
+function _dateStr(date) {
+  const tz = process.env.TIMEZONE || 'America/Paramaribo';
+  return date.toLocaleDateString('en-CA', { timeZone: tz }); // en-CA gives YYYY-MM-DD
+}
 function _toAmPm(h, m)  {
   const p  = h >= 12 ? 'PM' : 'AM';
   const hr = h > 12 ? h - 12 : h === 0 ? 12 : h;
@@ -827,22 +1388,28 @@ function _toAmPm(h, m)  {
 
 module.exports = {
   getSetting, setSetting, getAllSettings, setManySettings,
-  getEmployees, getActiveEmployees, getEmployee, getEmployeesForService, createEmployee, updateEmployee, toggleEmployee,
+  getEmployees, getActiveEmployees, getEmployee, getEmployeesForService, createEmployee, updateEmployee, toggleEmployee, deleteEmployee, getBarberForPhone,
+  getHouseCallEmployees, getShopCoordinates, calculateHouseCallPricing,
   isEmployeeAwayToday, toggleEmployeeAwayToday,
   getHoursForDay, getWeeklyHours, setWeeklyHours,
+  getHouseCallHoursForDay, getHouseCallWeeklyHours, setHouseCallWeeklyHours,
   getActiveServices, getAllServices, getService, upsertService, toggleService, deleteService,
   getBotMessages, getBotMessage, setBotMessage, setManyMessages,
   getAppointments, getTodayAppointments, getDashboardStats,
   createAppointment, updateAppointment,
-  getAppointmentByCode, getAppointmentById, cancelAppointment, rescheduleAppointment, isNewCustomer,
+  getAppointmentByCode, getActiveGroupAppointments, getActiveSiblingAppointments, getUpcomingAppointmentsByPhone, getAppointmentById, cancelAppointment, rescheduleAppointment, isNewCustomer,
   getUnsurveyedAppointments, markSurveySent, saveRating, getNoShowCount,
-  getAvailableSlotsForEmployee, getAvailableSlotsForAny, getAvailableSlotsForGroup, pickLeastBusyEmployee, getAvailableDates,
+  getAvailableSlotsForEmployee, getAvailableSlotsForAny, getAvailableSlotsForGroup,
+  getAvailableSlotsForParallelGroup, getAvailableSlotsForSequentialGroup, getAvailableSlotsForBatchGroup,
+  pickLeastBusyEmployee, getAvailableDates, localeLongDate,
   getPhotos, getPhotoTags, addPhoto, updatePhoto, deletePhoto,
+  getTrainingVideos, addTrainingVideo, updateTrainingVideo, deleteTrainingVideo,
   getBlocks, addBlock, deleteBlock,
   getSurinameseHolidays, syncSurinameseHolidays,
   getLeaves, getLeave, addLeave, deleteLeave, isEmployeeOnLeave,
   getCustomerByPhone, getAllCustomers, getAllCustomersWithStats,
-  getOrCreateCustomer, addPhoneToCustomer, removePhoneFromCustomer,
-  blockCustomer, unblockCustomer, updateCustomer, isPhoneBlocked,
-  getCustomerPrices, setCustomerPrice, deleteCustomerPrice, getSpecialPrice,
+  getOrCreateCustomer, addPhoneToCustomer, removePhoneFromCustomer, saveCustomerLanguage,
+  blockCustomer, unblockCustomer, updateCustomer, deleteCustomer, isPhoneBlocked,
+  getAppointmentsForCustomer,
+  getKeywords, addKeyword, updateKeyword, deleteKeyword, matchKeyword,
 };

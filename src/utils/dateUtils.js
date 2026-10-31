@@ -15,7 +15,7 @@ function getAvailableDates() {
   const dates = [];
   const today = new Date();
 
-  for (let i = 1; i <= BOOKING_DAYS_AHEAD && dates.length < 7; i++) {
+  for (let i = 0; i <= BOOKING_DAYS_AHEAD && dates.length < 7; i++) {
     const d = new Date(today);
     d.setDate(today.getDate() + i);
     d.setHours(0, 0, 0, 0);
