@@ -126,7 +126,11 @@ client.on('message', (msg) => {
   // several empty-body events in a row; each one would re-show the menu, so the
   // customer sees the welcome/menu 2–3× back-to-back. The next real text still
   // triggers the welcome exactly once.
-  if (!(msg.body || '').trim()) return;
+  // A shared location is the one empty-body exception — house calls need it
+  // (see conversationHandler's AWAITING_HOUSE_CALL_LOCATION handling); it's
+  // still meaningless outside that state, but handleMessage() itself ignores
+  // it there rather than filtering it out at this layer.
+  if (!(msg.body || '').trim() && msg.type !== 'location') return;
 
   // Serialize handling per chat so a customer's rapid-fire messages are processed
   // one at a time, in order — fixes new customers getting the welcome 2–3× in a row.

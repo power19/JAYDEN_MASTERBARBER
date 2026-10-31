@@ -28,6 +28,7 @@ const {
 } = require('../services/googleCalendar');
 const { t, ordinal, buildLanguageMenu, matchLanguage } = require('../i18n/translations');
 const { generateIcs }                       = require('../utils/icsGenerator');
+const { haversineKm }                       = require('../utils/geo');
 const PRIVACY_POLICY                        = require('../config/privacyPolicy');
 
 const NUM       = ['1️⃣','2️⃣','3️⃣','4️⃣','5️⃣','6️⃣','7️⃣','8️⃣','9️⃣','🔟'];
@@ -42,11 +43,35 @@ const CUR = () => q.getSetting('currency') || 'SRD';
 const maxGroupSize = (numBarbers) =>
   Math.max(1, Math.min(numBarbers, +q.getSetting('max_group_size') || 3));
 
+// House calls add travel time on top of the service itself — this is the one
+// place that inflation is computed, reused everywhere a duration is needed
+// for slot generation or the final appointment write, so the service's own
+// `duration` field never has to be mutated.
+const effectiveDuration = (session) =>
+  session.selectedService.duration + (session.isHouseCall ? (session.houseCallExtraMinutes || 0) : 0);
+
 // Thrown by bookOne() when createAppointment() refuses a write because another
 // customer's booking landed on the same employee/time first (see the overlap
 // guard in queries.js). Caught in finalizeBooking/onConfirmMulti to bounce the
 // customer back to time selection instead of silently double-booking.
 class SlotTakenError extends Error {}
+
+// whatsapp-web.js can fail to send media (photos/QR codes) to customers whose
+// WhatsApp ID is the newer "@lid" (linked ID) format, throwing a WhatsApp Web
+// internal error — "Data passed to getter must include an id property" —
+// because it can't resolve the chat object on the direct send path. Fetching
+// the Chat object first and sending through it takes a different internal
+// path that usually succeeds where client.sendMessage(id, media) does not.
+// Text-only sendMessage calls are unaffected and don't need this.
+async function sendMediaSafe(client, chatId, media, options) {
+  try {
+    return await client.sendMessage(chatId, media, options);
+  } catch (e) {
+    if (!/must include an id property/.test(e.message || '')) throw e;
+    const chat = await client.getChatById(chatId);
+    return await chat.sendMessage(media, options);
+  }
+}
 
 const isMenu      = tx => /^(menu|main|home|start|hi|hello|hey|hola|hallo|bonjour|bonsoir)$/i.test(tx.trim());
 const isCancel    = tx => /^(cancel|exit|quit|stop|annuleer|afsluiten|cancelar|salir|annuler|quitter)$/i.test(tx.trim());
@@ -115,6 +140,14 @@ async function handleMessage(message) {
 
   const session = sessions.getSession(userId);
   const lang    = session.language || null;
+
+  // House-call flow waiting for a WhatsApp location share. This is the one
+  // place an empty-body message is still meaningful — index.js/bot-runner.js
+  // let a `type: 'location'` message through their empty-body filter
+  // specifically so it can reach here.
+  if (session.state === 'AWAITING_HOUSE_CALL_LOCATION' && message.type === 'location' && message.location) {
+    return onHouseCallLocation(userId, message.location, session);
+  }
 
   // Parked after media (training video / gallery photos): the next message of
   // ANY kind just re-displays the main menu. It is never treated as an option
@@ -210,6 +243,8 @@ async function handleMessage(message) {
       return onCollectPersonName(userId, text, session);
     case 'COLLECTING_PERSON_SERVICE':
       return onCollectPersonService(userId, text, session);
+    case 'AWAITING_HOUSE_CALL_LOCATION':
+      return onHouseCallAwaitingText(userId, text, session);
     case 'SELECTING_DATE':
       return onDate(userId, text, session);
     case 'SELECTING_TIME':
@@ -343,6 +378,33 @@ async function dispatchKeyword(action, userId, lang, session) {
       sessions.updateSession(userId, { state: 'SELECTING_GROUP_SIZE', employees, servicePage: 0 });
       return buildGroupSizeMenu(lang, null, employees.length);
     }
+    case 'house_call': {
+      // Single customer only (v1). House Call is its own booking, not a pick
+      // from the regular service list — price is the distance fee alone, and
+      // duration is a fixed on-site visit length (house_call_visit_minutes)
+      // plus travel, so there's no real service to select. Go straight to
+      // requesting their location.
+      const houseCallEmployees = q.getHouseCallEmployees();
+      if (houseCallEmployees.length === 0) {
+        return `${t(lang, 'house_call_unavailable')}\n\n${buildMainMenu(lang)}`;
+      }
+      const visitMinutes = parseFloat(q.getSetting('house_call_visit_minutes')) || 45;
+      sessions.updateSession(userId, {
+        state: 'AWAITING_HOUSE_CALL_LOCATION',
+        groupSize: 1,
+        isHouseCall: true,
+        isAnyEmployee: true,
+        employees: houseCallEmployees,
+        selectedService: {
+          id: 'house_call',
+          name: t(lang, 'house_call_service_name'),
+          emoji: '🏠',
+          duration: visitMinutes,
+          price: 0,
+        },
+      });
+      return t(lang, 'house_call_share_location');
+    }
     case 'gallery':
       // No category picker — post the whole gallery straight away.
       return await sendGallery(userId, lang);
@@ -418,6 +480,7 @@ async function onService(userId, text, session) {
   }
 
   const service = services[actualIdx];
+
   let employees = q.getEmployeesForService(service.id);
 
   if (employees.length === 0) {
@@ -481,6 +544,66 @@ async function onService(userId, text, session) {
     datePage: 0,
   });
   return buildDateMenu(lang, dates, service, 0);
+}
+
+/**
+ * Handles a WhatsApp location share while awaiting one for a house call.
+ * Computes straight-line distance from the shop, looks up the fee/travel-time
+ * per the admin's configured pricing (queries.js `calculateHouseCallPricing`),
+ * and either continues into date selection or explains why it can't.
+ */
+async function onHouseCallLocation(userId, location, session) {
+  const lang = session.language;
+  const shop = q.getShopCoordinates();
+  if (!shop) {
+    // Not configured yet — fail safely rather than book an unpriced house call.
+    sessions.updateSession(userId, { state: 'MAIN_MENU' });
+    return `${t(lang, 'house_call_unavailable')}\n\n${buildMainMenu(lang)}`;
+  }
+
+  const distanceKm = haversineKm(shop.lat, shop.lng, location.latitude, location.longitude);
+  const pricing     = q.calculateHouseCallPricing(distanceKm);
+
+  if (!pricing.withinRange) {
+    sessions.updateSession(userId, { state: 'MAIN_MENU' });
+    const maxKm = q.getSetting('house_call_max_km') || '15';
+    return `${t(lang, 'house_call_out_of_range', { max: maxKm })}\n\n${buildMainMenu(lang)}`;
+  }
+
+  sessions.updateSession(userId, {
+    houseCallDistanceKm: Math.round(distanceKm * 10) / 10,
+    houseCallFee:         pricing.fee,
+    houseCallExtraMinutes: pricing.extraMinutes,
+    houseCallLat:          location.latitude,
+    houseCallLng:          location.longitude,
+    houseCallAddress:      location.description || location.address || '',
+  });
+
+  const employees = session.employees || q.getHouseCallEmployees();
+  const dates      = q.getAvailableDates(employees, lang, undefined, 20, true);
+  const updated    = sessions.updateSession(userId, {
+    state: 'SELECTING_DATE',
+    availableDates: dates,
+    datePage: 0,
+  });
+
+  const summary = t(lang, 'house_call_summary', {
+    km: (Math.round(distanceKm * 10) / 10).toString(),
+    fee: pricing.fee.toString(),
+    minutes: pricing.extraMinutes.toString(),
+    currency: CUR(),
+  });
+  return `${summary}\n\n${buildDateMenu(lang, dates, updated.selectedService, 0)}`;
+}
+
+/** Any text reply while waiting for a location share just re-sends the prompt (or goes back). */
+function onHouseCallAwaitingText(userId, text, session) {
+  const lang = session.language;
+  if (isBack(text, lang)) {
+    sessions.updateSession(userId, { state: 'MAIN_MENU' });
+    return buildMainMenu(lang);
+  }
+  return t(lang, 'house_call_share_location');
 }
 
 async function onGroupSize(userId, text, session) {
@@ -712,9 +835,9 @@ async function onDate(userId, text, session) {
     });
     return buildTimeMenuMulti(lang, selectedDate, freeSlots, session.persons, 0);
   } else if (session.isAnyEmployee) {
-    freeSlots = await q.getAvailableSlotsForAny(employees, selectedDate.date, service.duration);
+    freeSlots = await q.getAvailableSlotsForAny(employees, selectedDate.date, effectiveDuration(session), { isHouseCall: session.isHouseCall });
   } else {
-    freeSlots = await q.getAvailableSlotsForEmployee(session.selectedEmployee, selectedDate.date, service.duration);
+    freeSlots = await q.getAvailableSlotsForEmployee(session.selectedEmployee, selectedDate.date, effectiveDuration(session), { isHouseCall: session.isHouseCall });
   }
 
   if (freeSlots.length === 0) {
@@ -782,7 +905,7 @@ async function onTime(userId, text, session) {
   const customerPhone  = userId.replace(/@\S+$/, '');
   const knownCustomer  = q.getCustomerByPhone(customerPhone);
   if (knownCustomer?.name) {
-    const summary = buildConfirmationSummary(lang, knownCustomer.name, session.selectedService, session.selectedDate, selectedSlot, session.groupSize || 1);
+    const summary = buildConfirmationSummary(lang, knownCustomer.name, session.selectedService, session.selectedDate, selectedSlot, session.groupSize || 1, session.isHouseCall ? (session.houseCallFee || 0) : 0);
     const updated = sessions.updateSession(userId, { selectedTime: selectedSlot, slotPage: 0, userName: knownCustomer.name });
     const result  = await finalizeBooking(userId, updated);
     return [summary, result];
@@ -796,7 +919,7 @@ async function onName(userId, text, session) {
   const lang = session.language;
   if (text.length < 2) return t(lang, 'name_too_short');
   const name = text.trim();
-  const summary = buildConfirmationSummary(lang, name, session.selectedService, session.selectedDate, session.selectedTime, session.groupSize || 1);
+  const summary = buildConfirmationSummary(lang, name, session.selectedService, session.selectedDate, session.selectedTime, session.groupSize || 1, session.isHouseCall ? (session.houseCallFee || 0) : 0);
   const updated = sessions.updateSession(userId, { userName: name });
   const result  = await finalizeBooking(userId, updated);
   return [summary, result];
@@ -840,10 +963,18 @@ async function finalizeBooking(userId, session) {
       service_id:       selectedService.id,
       service_name:     selectedService.name,
       service_emoji:    selectedService.emoji,
-      service_duration: selectedService.duration,
-      service_price:    selectedService.price,
+      service_duration: effectiveDuration(session),
+      service_price:    selectedService.price + (session.isHouseCall ? (session.houseCallFee || 0) : 0),
       start_time:       slot.start,
       end_time:         slot.end,
+      ...(session.isHouseCall ? {
+        is_house_call:          1,
+        house_call_lat:         session.houseCallLat,
+        house_call_lng:         session.houseCallLng,
+        house_call_address:     session.houseCallAddress || '',
+        house_call_distance_km: session.houseCallDistanceKm,
+        house_call_fee:         session.houseCallFee || 0,
+      } : {}),
     });
 
     let dbResult = q.createAppointment(apptData(barber?.id));
@@ -869,6 +1000,12 @@ async function finalizeBooking(userId, session) {
           bookingCode:   dbResult.booking_code,
           employeeName:  barber?.name,
           employeeColor: barber?.color,
+          houseCall: session.isHouseCall ? {
+            distanceKm: session.houseCallDistanceKm,
+            lat: session.houseCallLat,
+            lng: session.houseCallLng,
+            address: session.houseCallAddress,
+          } : null,
         });
         if (r.success) {
           q.updateAppointment(dbResult.lastInsertRowid, { google_event_id: r.eventId, google_event_link: r.eventLink });
@@ -922,8 +1059,8 @@ async function finalizeBooking(userId, session) {
     }
     const employees = session.employees || q.getActiveEmployees();
     const freeSlots  = session.isAnyEmployee
-      ? await q.getAvailableSlotsForAny(employees, selectedDate.date, selectedService.duration)
-      : await q.getAvailableSlotsForEmployee(session.selectedEmployee, selectedDate.date, selectedService.duration);
+      ? await q.getAvailableSlotsForAny(employees, selectedDate.date, effectiveDuration(session), { isHouseCall: session.isHouseCall })
+      : await q.getAvailableSlotsForEmployee(session.selectedEmployee, selectedDate.date, effectiveDuration(session), { isHouseCall: session.isHouseCall });
     sessions.updateSession(userId, { state: 'SELECTING_TIME', selectedTime: null, availableSlots: freeSlots, slotPage: 0 });
     return freeSlots.length
       ? `${t(lang, 'slot_taken_retry')}\n\n${buildTimeMenu(lang, selectedDate, freeSlots, selectedService, 0)}`
@@ -980,9 +1117,17 @@ async function finalizeBooking(userId, session) {
     lines.push(`${t(lang, 'confirm_price')}: *${CUR()} ${totalPrice} (${totalCount}×${selectedService.price})*`);
   }
 
-  const shopAddress  = q.getSetting('shop_address') || '';
-  const mapsLink     = q.getSetting('google_maps_link') || '';
-  const addressLine  = mapsLink ? `📍 ${shopAddress}\n${mapsLink}` : `📍 ${shopAddress}`;
+  // House calls: the barber travels to the customer, so the shop's own
+  // address/map link is irrelevant here (and confusing — it reads like the
+  // customer needs to go there). Swap it for a short reassurance line instead.
+  let addressLine;
+  if (session.isHouseCall) {
+    addressLine = t(lang, 'booked_house_call_note');
+  } else {
+    const shopAddress = q.getSetting('shop_address') || '';
+    const mapsLink     = q.getSetting('google_maps_link') || '';
+    addressLine = mapsLink ? `📍 ${shopAddress}\n${mapsLink}` : `📍 ${shopAddress}`;
+  }
 
   lines.push(
     ``,
@@ -1032,7 +1177,7 @@ async function finalizeBooking(userId, session) {
         const base64  = qrDataUrl.split(',')[1];
         const media   = new MessageMedia('image/png', base64, `checkin-${booking.code}.png`);
         const caption = `🔲 *Check-in code: ${booking.code}*`;
-        await wClient.sendMessage(userId, media, { caption });
+        await sendMediaSafe(wClient, userId, media, { caption });
       }
     }
   } catch (e) {
@@ -1190,7 +1335,7 @@ async function onConfirmMulti(userId, session) {
         const base64  = qrDataUrl.split(',')[1];
         const media   = new MessageMedia('image/png', base64, `checkin-${b.code}.png`);
         const caption = `🔲 *Check-in code: ${b.code}* (${b.person.name})`;
-        await wClient.sendMessage(userId, media, { caption });
+        await sendMediaSafe(wClient, userId, media, { caption });
       }
     }
   } catch (e) {
@@ -1327,15 +1472,22 @@ function onManageOptions(userId, text, session) {
 
   switch (text.trim()) {
     case '1': {
-      // Reschedule — use the same assigned employee
+      // Reschedule — use the same assigned employee. House calls check their
+      // own availability schedule (Settings → House Calls), not the barber's
+      // regular in-shop hours, and the "any employee" fallback pool is
+      // restricted to house-call barbers rather than every active barber.
+      const isHouseCall = !!appt.is_house_call;
       const employee  = appt.employee_id ? q.getEmployee(appt.employee_id) : null;
-      const employees = employee ? [employee] : q.getActiveEmployees();
-      const dates     = q.getAvailableDates(employees, lang);
+      const employees = employee ? [employee] : (isHouseCall ? q.getHouseCallEmployees() : q.getActiveEmployees());
+      const dates     = q.getAvailableDates(employees, lang, undefined, 20, isHouseCall);
 
       if (dates.length === 0) {
         return `${t(lang, 'no_dates_available')}\n\n${buildManageOptions(lang, appt)}`;
       }
 
+      // service.duration is the appointment's already-stored total (visit +
+      // travel time for a house call) — reused as-is rather than recomputed,
+      // since the customer's location isn't changing on a reschedule.
       const service = {
         id: appt.service_id, name: appt.service_name,
         emoji: appt.service_emoji || '', duration: appt.service_duration, price: appt.service_price,
@@ -1346,6 +1498,7 @@ function onManageOptions(userId, text, session) {
         rescheduleService: service,
         rescheduleAvailableDates: dates,
         rescheduleDatePage: 0,
+        rescheduleIsHouseCall: isHouseCall,
       });
       return buildDateMenu(lang, dates, service, 0);
     }
@@ -1498,9 +1651,10 @@ async function onRescheduleDate(userId, text, session) {
   const employee     = session.rescheduleEmployee;
 
   // Exclude the current appointment so its own time slot shows as free
+  const isHouseCall = session.rescheduleIsHouseCall;
   const slots = employee
-    ? await q.getAvailableSlotsForEmployee(employee, selectedDate.date, service.duration, { excludeId: session.managedAppointment.id })
-    : await q.getAvailableSlotsForAny(q.getActiveEmployees(), selectedDate.date, service.duration);
+    ? await q.getAvailableSlotsForEmployee(employee, selectedDate.date, service.duration, { excludeId: session.managedAppointment.id, isHouseCall })
+    : await q.getAvailableSlotsForAny(isHouseCall ? q.getHouseCallEmployees() : q.getActiveEmployees(), selectedDate.date, service.duration, { isHouseCall });
 
   if (slots.length === 0) {
     return `${t(lang, 'no_slots_date', { date: selectedDate.fullDisplay })}\n\n${buildDateMenu(lang, dates, service, page)}`;
@@ -1653,7 +1807,7 @@ async function sendGallery(userId, lang) {
         const media    = new MessageMedia(mime, b64, photo.filename);
         let caption    = photo.caption || '';
         if (isLast) caption += `${caption ? '\n\n' : ''}${t(lang, 'media_return_hint')}`;
-        await wClient.sendMessage(userId, media, { caption: caption || undefined });
+        await sendMediaSafe(wClient, userId, media, { caption: caption || undefined });
       }
       // Park the customer: any next message just re-shows the menu.
       sessions.updateSession(userId, { state: 'AWAITING_MENU_RETURN' });
@@ -1714,7 +1868,7 @@ async function onTraining(userId, lang) {
         const caption  = isLast
           ? `${video.caption ? video.caption + '\n\n' : ''}${t(lang, 'media_return_hint')}`
           : (video.caption || undefined);
-        await wClient.sendMessage(userId, media, { caption });
+        await sendMediaSafe(wClient, userId, media, { caption });
       }
       // Park the customer: any next message just re-shows the menu.
       sessions.updateSession(userId, { state: 'AWAITING_MENU_RETURN' });
@@ -1744,6 +1898,7 @@ const MENU_ITEM_LABEL = {
   training: (lang) => t(lang, 'menu_training'),
   feedback: (lang) => t(lang, 'menu_feedback'),
   privacy:  (lang) => t(lang, 'menu_privacy'),
+  house_call: (lang) => t(lang, 'menu_house_call'),
 };
 
 const MENU_ITEM_EMOJI = {
@@ -1758,27 +1913,41 @@ const MENU_ITEM_EMOJI = {
   training: '🎓',
   feedback: '💬',
   privacy:  '🔒',
+  house_call: '🏠',
 };
 
 function getMenuItems() {
+  let items;
   try {
     const raw = q.getSetting('menu_order');
-    if (raw) return JSON.parse(raw);
-  } catch (_) {}
-  // Fallback to hardcoded defaults
-  return [
-    { action: 'booking',  enabled: true  },
-    { action: 'hours',    enabled: true  },
-    { action: 'location', enabled: true  },
-    { action: 'prices',   enabled: true  },
-    { action: 'contact',  enabled: true  },
-    { action: 'gallery',  enabled: true  },
-    { action: 'language', enabled: true  },
-    { action: 'manage',   enabled: true  },
-    { action: 'training', enabled: false },
-    { action: 'feedback', enabled: true  },
-    { action: 'privacy',  enabled: true  },
-  ];
+    items = raw ? JSON.parse(raw) : null;
+  } catch (_) { items = null; }
+  if (!items) {
+    // Fallback to hardcoded defaults
+    items = [
+      { action: 'booking',    enabled: true  },
+      { action: 'hours',      enabled: true  },
+      { action: 'location',   enabled: true  },
+      { action: 'prices',     enabled: true  },
+      { action: 'contact',    enabled: true  },
+      { action: 'gallery',    enabled: true  },
+      { action: 'language',   enabled: true  },
+      { action: 'manage',     enabled: true  },
+      { action: 'training',   enabled: false },
+      { action: 'feedback',   enabled: true  },
+      { action: 'privacy',    enabled: true  },
+      { action: 'house_call', enabled: false },
+    ];
+  }
+  // House calls have their own master switch (Settings → House Calls) on top
+  // of the normal per-item menu toggle — never show the menu item while the
+  // feature itself is off, even if it was left "enabled" in the menu editor.
+  // The dashboard's raw GET /api/menu (used by that editor) reads the setting
+  // directly and is unaffected, so admins can still configure it ahead of time.
+  if (q.getSetting('house_call_enabled') !== '1') {
+    items = items.map(m => m.action === 'house_call' ? { ...m, enabled: false } : m);
+  }
+  return items;
 }
 
 // Live menu number of the "manage" option (cancel/reschedule self-service),
@@ -1956,11 +2125,16 @@ function buildTimeMenu(lang, date, slots, service, page = 0) {
   return `${t(lang, 'select_time')}\n_${date.fullDisplay} — ${service.emoji} ${service.name}_\n\n${groupNote}${list}${moreHint}\n\n_${t(lang, 'reply_or_back')}_`;
 }
 
-function buildConfirmationSummary(lang, name, service, date, time, groupSize = 1) {
+function buildConfirmationSummary(lang, name, service, date, time, groupSize = 1, extraFee = 0) {
   const mainCount     = time.mainCount     || 1;
   const overflowCount = time.overflowCount || 0;
   const totalCount    = mainCount + overflowCount;
   const totalPrice    = (+service.price * totalCount).toFixed(0);
+  // House calls are single-person only, so extraFee (the distance fee) only
+  // ever applies in the totalCount === 1 branch below — it's on top of
+  // service.price, which is 0 for a house call (see the synthetic service
+  // built in dispatchKeyword's 'house_call' case).
+  const singlePrice   = (+service.price + extraFee).toFixed(0);
 
   const lines = [];
   lines.push(`${t(lang, 'confirm_name')}: *${name}*`);
@@ -1980,7 +2154,7 @@ function buildConfirmationSummary(lang, name, service, date, time, groupSize = 1
     lines.push(`${service.emoji} ${t(lang, 'confirm_service')}  : *${service.name}*`);
     lines.push(`${t(lang, 'confirm_date')}    : *${date.fullDisplay}*`);
     lines.push(`${t(lang, 'confirm_time')}    : *${time.display}*`);
-    lines.push(`${t(lang, 'confirm_price')}   : *${CUR()} ${service.price}*`);
+    lines.push(`${t(lang, 'confirm_price')}   : *${CUR()} ${singlePrice}*`);
   }
 
   return lines.join('\n');

@@ -580,9 +580,9 @@ router.get('/employees', (req, res) => {
 
 router.post('/employees', async (req, res) => {
   try {
-    const { name, phone, color, google_calendar_id, excluded_service_ids } = req.body;
+    const { name, phone, color, google_calendar_id, excluded_service_ids, does_house_calls } = req.body;
     if (!name) return res.status(400).json({ error: 'Name is required' });
-    const result = q.createEmployee(name, phone, color, google_calendar_id, excluded_service_ids || []);
+    const result = q.createEmployee(name, phone, color, google_calendar_id, excluded_service_ids || [], does_house_calls);
     // Auto-share shop calendar with new barber if they have a Gmail set
     if (google_calendar_id) {
       const { shareCalendarWithBarber } = require('../../services/googleCalendar');
@@ -814,7 +814,7 @@ router.get('/customers/:id/appointments', (req, res) => {
 
 // ── Menu order ────────────────────────────────────────────────────────────────
 
-const VALID_ACTIONS = new Set(['booking','hours','location','prices','contact','gallery','language','manage','training','feedback','privacy']);
+const VALID_ACTIONS = new Set(['booking','hours','location','prices','contact','gallery','language','manage','training','feedback','privacy','house_call']);
 
 router.get('/menu', (req, res) => {
   try {

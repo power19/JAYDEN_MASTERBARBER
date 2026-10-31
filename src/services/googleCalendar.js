@@ -7,6 +7,7 @@
  */
 const { google } = require('googleapis');
 const path       = require('path');
+const { mapsLinkFor } = require('../utils/geo');
 
 const DEFAULT_CALENDAR_ID = process.env.GOOGLE_CALENDAR_ID || 'primary';
 const CREDENTIALS_PATH    = process.env.GOOGLE_CREDENTIALS_PATH ||
@@ -81,7 +82,7 @@ async function _getCalendar() {
  * @param {string}  [opts.calendarId]    - overrides the default calendar
  * @param {string}  [opts.employeeName]  - shown in event title
  */
-async function createAppointment({ service, startTime, endTime, customerName, bookingCode, calendarId, employeeName, employeeColor }) {
+async function createAppointment({ service, startTime, endTime, customerName, bookingCode, calendarId, employeeName, employeeColor, houseCall }) {
   const timezone   = process.env.TIMEZONE || 'America/Paramaribo';
   const currency   = process.env.CURRENCY || 'SRD';
   const targetCal  = calendarId || DEFAULT_CALENDAR_ID;
@@ -90,7 +91,7 @@ async function createAppointment({ service, startTime, endTime, customerName, bo
     const cal = await _getCalendar();
 
     const dot = employeeName ? `${hexToCircleEmoji(employeeColor)} ` : '';
-    const titleParts = [`💈 ${service.name}`, customerName];
+    const titleParts = [`💈 ${houseCall ? '🏠 ' : ''}${service.name}`, customerName];
     if (employeeName) titleParts.splice(1, 0, `(${employeeName})`);
 
     const event = {
@@ -102,9 +103,12 @@ async function createAppointment({ service, startTime, endTime, customerName, bo
         `🎫 Code    : ${bookingCode}`,
         `💰 Price   : ${currency} ${service.price}`,
         `⏱️  Duration: ${service.duration} min`,
+        houseCall ? `🏠 House call: ${houseCall.distanceKm} km — ${mapsLinkFor(houseCall.lat, houseCall.lng)}` : '',
+        houseCall?.address ? `📍 ${houseCall.address}` : '',
         '',
         '📅 Booked via WhatsApp Bot',
       ].filter(Boolean).join('\n'),
+      ...(houseCall ? { location: houseCall.address || `${houseCall.lat},${houseCall.lng}` } : {}),
       start: { dateTime: startTime.toISOString(), timeZone: timezone },
       end:   { dateTime: endTime.toISOString(),   timeZone: timezone },
       colorId: hexToCalColorId(employeeColor),

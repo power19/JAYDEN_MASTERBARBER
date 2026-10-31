@@ -238,6 +238,10 @@
                 <div class="font-semibold text-slate-800 text-sm flex items-center gap-2 flex-wrap">
                   <span x-text="a.customer_name"></span>
                   <span class="text-xs font-mono text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded" x-text="'#' + (a.booking_code || '?')"></span>
+                  <a x-show="a.is_house_call" :href="`https://maps.google.com/?q=${a.house_call_lat},${a.house_call_lng}`" target="_blank"
+                     class="text-xs font-semibold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded" title="View house call location">
+                    🏠 <span x-text="a.house_call_distance_km + ' km'"></span>
+                  </a>
                 </div>
                 <div class="text-slate-500 text-xs" x-text="`${a.service_emoji} ${a.service_name} · ${a.employee_name || 'Unassigned'}`"></div>
                 <div x-show="a.customer_phone" class="text-slate-400 text-xs mt-0.5" x-text="'📱 ' + (a.customer_phone || '').replace(/@\S+$/, '')"></div>
@@ -372,7 +376,13 @@
                     <div class="text-slate-400 text-xs font-mono tracking-widest" x-text="'#' + (a.booking_code || '—')"></div>
                     <div x-show="a.customer_phone" class="text-slate-400 text-xs mt-0.5" x-text="'📱 ' + (a.customer_phone || '').replace(/@\S+$/, '')"></div>
                   </td>
-                  <td class="py-3" x-text="`${a.service_emoji} ${a.service_name}`"></td>
+                  <td class="py-3">
+                    <div x-text="`${a.service_emoji} ${a.service_name}`"></div>
+                    <a x-show="a.is_house_call" :href="`https://maps.google.com/?q=${a.house_call_lat},${a.house_call_lng}`" target="_blank"
+                       class="inline-block text-xs font-semibold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded mt-0.5" title="View house call location">
+                      🏠 <span x-text="a.house_call_distance_km + ' km'"></span>
+                    </a>
+                  </td>
                   <td class="py-3">
                     <div class="flex items-center gap-2">
                       <div class="w-2.5 h-2.5 rounded-full" :style="`background:${a.employee_color||'#94a3b8'}`"></div>
@@ -702,6 +712,10 @@
                     <span x-show="e.isAwayToday"
                           class="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">
                       🚫 Away Today
+                    </span>
+                    <span x-show="settings.house_call_enabled === '1' && e.does_house_calls"
+                          class="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">
+                      🏠 House Calls
                     </span>
                   </div>
                 </td>
@@ -1654,6 +1668,7 @@
       <div class="flex gap-1 mb-6 bg-slate-100 p-1 rounded-xl w-fit flex-wrap">
         <button @click="settingsTab='shop'"         :class="settingsTab==='shop'         ? 'bg-white shadow text-slate-800 font-semibold' : 'text-slate-500 hover:text-slate-700'" class="px-4 py-2 rounded-lg text-sm transition">🏪 Shop</button>
         <button @click="settingsTab='booking'"      :class="settingsTab==='booking'      ? 'bg-white shadow text-slate-800 font-semibold' : 'text-slate-500 hover:text-slate-700'" class="px-4 py-2 rounded-lg text-sm transition">📅 Booking</button>
+        <button @click="settingsTab='housecalls'"   :class="settingsTab==='housecalls'   ? 'bg-white shadow text-slate-800 font-semibold' : 'text-slate-500 hover:text-slate-700'" class="px-4 py-2 rounded-lg text-sm transition">🏠 House Calls</button>
         <button @click="settingsTab='notifications'":class="settingsTab==='notifications'? 'bg-white shadow text-slate-800 font-semibold' : 'text-slate-500 hover:text-slate-700'" class="px-4 py-2 rounded-lg text-sm transition">🔔 Notifications</button>
         <button @click="settingsTab='rules'"        :class="settingsTab==='rules'        ? 'bg-white shadow text-slate-800 font-semibold' : 'text-slate-500 hover:text-slate-700'" class="px-4 py-2 rounded-lg text-sm transition">⚠️ Rules</button>
         <button @click="settingsTab='integrations'" :class="settingsTab==='integrations' ? 'bg-white shadow text-slate-800 font-semibold' : 'text-slate-500 hover:text-slate-700'" class="px-4 py-2 rounded-lg text-sm transition">🔗 Integrations</button>
@@ -1779,6 +1794,150 @@
                 <option :value="String(e.id)" x-text="e.name"></option>
               </template>
             </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── TAB: House Calls ─────────────────────────────────────────── -->
+      <div x-show="settingsTab==='housecalls'" class="max-w-xl space-y-6">
+        <div class="card space-y-5">
+          <div class="flex items-center gap-3">
+            <input type="checkbox" id="chk-house-call-enabled"
+              :checked="settings.house_call_enabled === '1'"
+              @change="settings.house_call_enabled = $event.target.checked ? '1' : '0'"
+              class="w-4 h-4 accent-amber-500">
+            <label for="chk-house-call-enabled" class="text-sm text-slate-700 cursor-pointer font-semibold">
+              🏠 Enable house calls
+            </label>
+          </div>
+          <p class="text-xs text-slate-400">Customers can request a home visit; the bot asks them to share their WhatsApp location and calculates a fee and extra time from it. Requires at least one barber marked "Does house calls" on the Employees page.</p>
+
+          <div x-show="settings.house_call_enabled === '1'" class="space-y-5 pt-2 border-t border-slate-100">
+            <div>
+              <label class="label">Shop Coordinates</label>
+              <div class="flex gap-2">
+                <input type="text" x-model="settings.shop_latitude"  class="input" placeholder="Latitude, e.g. 5.8520">
+                <input type="text" x-model="settings.shop_longitude" class="input" placeholder="Longitude, e.g. -55.2038">
+              </div>
+              <p class="text-xs text-slate-400 mt-1">Find these by right-clicking your shop's location on Google Maps and copying the coordinates shown at the top of the menu.</p>
+            </div>
+
+            <div>
+              <label class="label">Max House Call Distance (km)</label>
+              <input type="number" x-model="settings.house_call_max_km" class="input w-28" min="1">
+              <p class="text-xs text-slate-400 mt-1">Beyond this distance, house calls aren't offered.</p>
+            </div>
+
+            <div>
+              <label class="label">Pricing Model</label>
+              <div class="flex gap-4 mt-1">
+                <label class="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                  <input type="radio" value="formula" x-model="settings.house_call_pricing_mode" class="accent-amber-500"> Base fee + rate per km
+                </label>
+                <label class="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                  <input type="radio" value="tiers" x-model="settings.house_call_pricing_mode" class="accent-amber-500"> Flat distance tiers
+                </label>
+              </div>
+            </div>
+
+            <!-- Formula mode fields -->
+            <div x-show="settings.house_call_pricing_mode === 'formula'" class="grid grid-cols-3 gap-3">
+              <div>
+                <label class="label">Included in base fee (km)</label>
+                <input type="number" x-model="settings.house_call_free_km" class="input" min="0">
+              </div>
+              <div>
+                <label class="label">Base fee</label>
+                <input type="number" x-model="settings.house_call_base_fee" class="input" min="0">
+                <p class="text-xs text-slate-400 mt-1">Charged for any house call, covering the included distance above.</p>
+              </div>
+              <div>
+                <label class="label">Per extra km</label>
+                <input type="number" x-model="settings.house_call_per_km_fee" class="input" min="0">
+              </div>
+            </div>
+
+            <!-- Tiers mode editor -->
+            <div x-show="settings.house_call_pricing_mode === 'tiers'" x-data="{
+                   get tiers() { try { return JSON.parse(settings.house_call_tiers || '[]') } catch(e) { return [] } },
+                   set tiers(v) { settings.house_call_tiers = JSON.stringify(v) },
+                 }">
+              <label class="label">Distance Tiers</label>
+              <div class="space-y-2">
+                <template x-for="(tier, idx) in tiers" :key="idx">
+                  <div class="flex items-center gap-2">
+                    <span class="text-xs text-slate-500">Up to</span>
+                    <input type="number" min="0" class="input w-20" :value="tier.upTo"
+                      @input="const t=[...tiers]; t[idx]={...t[idx], upTo: +$event.target.value}; tiers = t">
+                    <span class="text-xs text-slate-500">km →</span>
+                    <input type="number" min="0" class="input w-24" :value="tier.fee"
+                      @input="const t=[...tiers]; t[idx]={...t[idx], fee: +$event.target.value}; tiers = t">
+                    <span class="text-xs text-slate-500">fee</span>
+                    <button @click="tiers = tiers.filter((_, i) => i !== idx)" class="text-red-400 hover:text-red-600 text-xs font-semibold ml-auto">✕</button>
+                  </div>
+                </template>
+              </div>
+              <button @click="tiers = [...tiers, { upTo: (tiers[tiers.length-1]?.upTo || 0) + 5, fee: 0 }]" class="btn-secondary text-xs py-1 px-3 mt-2">+ Add Tier</button>
+              <p class="text-xs text-slate-400 mt-1">Distance is matched against the first tier whose "up to" is greater or equal — keep them in ascending order.</p>
+            </div>
+
+            <div class="pt-2 border-t border-slate-100">
+              <label class="label">Visit Duration (min)</label>
+              <input type="number" x-model="settings.house_call_visit_minutes" class="input w-28" min="0">
+              <p class="text-xs text-slate-400 mt-1">Fixed on-site cutting time — house calls are their own booking, not a choice of service, so this is the same for every house call.</p>
+            </div>
+
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="label">Travel Setup Time (min)</label>
+                <input type="number" x-model="settings.house_call_travel_buffer_minutes" class="input" min="0">
+                <p class="text-xs text-slate-400 mt-1">Flat time always added, regardless of distance.</p>
+              </div>
+              <div>
+                <label class="label">Travel Time per km (min)</label>
+                <input type="number" x-model="settings.house_call_travel_minutes_per_km" class="input" min="0">
+                <p class="text-xs text-slate-400 mt-1">One-way estimate — doubled automatically for the drive back to the shop.</p>
+              </div>
+            </div>
+
+            <div class="pt-2 border-t border-slate-100">
+              <label class="label">Availability</label>
+              <p class="text-xs text-slate-400 mb-3">When house calls can be booked — independent of barbers' in-shop hours (e.g. evenings, or days the shop itself is closed).</p>
+              <div class="space-y-2" x-data="{
+                     get hcHours() {
+                       try {
+                         const h = JSON.parse(settings.house_call_hours || '[]');
+                         return Array.from({length:7}, (_,d) => h.find(r=>r.day_of_week===d) || { day_of_week:d, is_open:0, open_time:'09:00', close_time:'18:00' });
+                       } catch(e) { return Array.from({length:7}, (_,d) => ({ day_of_week:d, is_open:0, open_time:'09:00', close_time:'18:00' })); }
+                     },
+                     set hcHours(v) { settings.house_call_hours = JSON.stringify(v); },
+                   }">
+                <template x-for="(h, idx) in hcHours" :key="h.day_of_week">
+                  <div class="flex flex-wrap items-center gap-3 p-2 rounded-xl hover:bg-slate-50">
+                    <div class="w-20 sm:w-24 text-sm font-medium text-slate-700"
+                         x-text="['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][h.day_of_week]"></div>
+                    <button @click="const arr=[...hcHours]; arr[idx]={...arr[idx], is_open: arr[idx].is_open ? 0 : 1}; hcHours=arr;"
+                      :class="h.is_open ? 'bg-amber-500' : 'bg-slate-300'"
+                      class="relative inline-flex h-6 w-11 rounded-full transition-colors flex-shrink-0">
+                      <span :class="h.is_open ? 'translate-x-6' : 'translate-x-1'"
+                        class="inline-block h-4 w-4 rounded-full bg-white shadow mt-1 transition-transform"></span>
+                    </button>
+                    <span class="text-xs text-slate-500 w-12" x-text="h.is_open ? 'Open' : 'Closed'"></span>
+                    <template x-if="h.is_open">
+                      <div class="flex items-center gap-2">
+                        <input type="time" :value="h.open_time"
+                          @change="const arr=[...hcHours]; arr[idx]={...arr[idx], open_time: $event.target.value}; hcHours=arr;"
+                          class="input w-28 sm:w-32 text-sm">
+                        <span class="text-slate-400">–</span>
+                        <input type="time" :value="h.close_time"
+                          @change="const arr=[...hcHours]; arr[idx]={...arr[idx], close_time: $event.target.value}; hcHours=arr;"
+                          class="input w-28 sm:w-32 text-sm">
+                      </div>
+                    </template>
+                  </div>
+                </template>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -2118,7 +2277,7 @@
 <template x-if="showEmployeeModal">
   <div class="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"
        @click.self="showEmployeeModal=false">
-    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6"
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto"
          x-transition:enter="transition ease-out duration-200"
          x-transition:enter-start="opacity-0 scale-95"
          x-transition:enter-end="opacity-100 scale-100">
@@ -2166,11 +2325,20 @@
             placeholder="example@gmail.com or calendar ID">
           <p class="text-xs text-slate-400 mt-1">Events for this barber will sync to this calendar.</p>
         </div>
+        <div x-show="settings.house_call_enabled === '1'" class="flex items-center gap-3">
+          <input type="checkbox" id="chk-house-calls"
+            :checked="employeeForm.does_house_calls"
+            @change="employeeForm.does_house_calls = $event.target.checked"
+            class="w-4 h-4 accent-amber-500">
+          <label for="chk-house-calls" class="text-sm text-slate-700 cursor-pointer">
+            🏠 Does <strong>house calls</strong>
+          </label>
+        </div>
         <div>
           <label class="label">Fallback Barbers <span class="normal-case font-normal text-slate-400">(optional, in priority order)</span></label>
           <p class="text-xs text-slate-400 mb-2">When this barber is unavailable, fixed customers are redirected down this list until one has availability.</p>
           <!-- Priority list -->
-          <div class="space-y-1 mb-2">
+          <div class="space-y-1 mb-2 max-h-40 overflow-y-auto pr-1">
             <template x-for="(fbId, idx) in employeeForm.fallbackEmployeeIds" :key="fbId">
               <div class="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">
                 <span class="text-xs font-bold text-slate-400 w-5" x-text="(idx + 1) + '.'"></span>
@@ -2223,7 +2391,7 @@
         <p class="text-xs text-slate-400">When these customers message the bot, only this barber's availability will be shown. Pick from customers who have already chatted with the bot.</p>
 
         <!-- Selected customers -->
-        <div class="space-y-1">
+        <div class="space-y-1 max-h-56 overflow-y-auto pr-1">
           <template x-for="cid in employeeForm.fixedCustomerIds" :key="cid">
             <div class="flex items-center justify-between bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
               <div>
@@ -2749,8 +2917,8 @@ function app() {
         if (c && !fixedCustomerIds.includes(c.id)) fixedCustomerIds.push(c.id);
       });
       this.employeeForm = emp
-        ? { name: emp.name, phone: emp.phone, color: emp.color, google_calendar_id: emp.google_calendar_id, excluded_service_ids: emp.excluded_service_ids || [], scan_pin: emp.scan_pin || '', fixedCustomerIds, fallbackEmployeeIds: (emp.fallback_employee_ids || []).map(String), newFallbackId: '' }
-        : { name: '', phone: '', color: '#f59e0b', google_calendar_id: '', excluded_service_ids: [], scan_pin: '', fixedCustomerIds: [], fallbackEmployeeIds: [], newFallbackId: '' };
+        ? { name: emp.name, phone: emp.phone, color: emp.color, google_calendar_id: emp.google_calendar_id, excluded_service_ids: emp.excluded_service_ids || [], scan_pin: emp.scan_pin || '', fixedCustomerIds, fallbackEmployeeIds: (emp.fallback_employee_ids || []).map(String), newFallbackId: '', does_house_calls: !!emp.does_house_calls }
+        : { name: '', phone: '', color: '#f59e0b', google_calendar_id: '', excluded_service_ids: [], scan_pin: '', fixedCustomerIds: [], fallbackEmployeeIds: [], newFallbackId: '', does_house_calls: false };
       this.showEmployeeModal = true;
     },
 

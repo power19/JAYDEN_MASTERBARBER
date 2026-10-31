@@ -36,14 +36,17 @@ function _assertColorFree(color, excludeId) {
   }
 }
 
-const createEmployee     = (name, phone, color, gcalId, excludedServiceIds) => {
+const createEmployee     = (name, phone, color, gcalId, excludedServiceIds, doesHouseCalls) => {
   _assertColorFree(color);
-  return db.employees.insert({ name, phone: phone||'', color: color||'#f59e0b', google_calendar_id: gcalId||'', is_active: 1, excluded_service_ids: excludedServiceIds||[], scan_pin: '' });
+  return db.employees.insert({ name, phone: phone||'', color: color||'#f59e0b', google_calendar_id: gcalId||'', is_active: 1, excluded_service_ids: excludedServiceIds||[], scan_pin: '', does_house_calls: doesHouseCalls ? 1 : 0 });
 };
 const updateEmployee     = (id, data) => {
   _assertColorFree(data.color, id);
-  return db.employees.updateById(id, { name: data.name, phone: data.phone||'', color: data.color, google_calendar_id: data.google_calendar_id||'', excluded_service_ids: data.excluded_service_ids||[], fixed_customer_phones: data.fixed_customer_phones||[], fallback_employee_ids: data.fallback_employee_ids||[] });
+  return db.employees.updateById(id, { name: data.name, phone: data.phone||'', color: data.color, google_calendar_id: data.google_calendar_id||'', excluded_service_ids: data.excluded_service_ids||[], fixed_customer_phones: data.fixed_customer_phones||[], fallback_employee_ids: data.fallback_employee_ids||[], does_house_calls: data.does_house_calls ? 1 : 0 });
 };
+
+/** Active barbers who currently offer house calls. */
+const getHouseCallEmployees = () => getActiveEmployees().filter(e => e.does_house_calls);
 
 /**
  * Returns the active employee whose fixed_customer_phones list contains this phone number.
@@ -196,6 +199,36 @@ function setWeeklyHours(employeeId, hoursArray) {
   }
 }
 
+// House calls run on their own weekly schedule (Settings → House Calls),
+// stored as a single JSON setting rather than in businessHours — it's not
+// per-barber (only one schedule for the whole house-call offering) and is
+// deliberately independent of any barber's in-shop hours, so a shop that's
+// closed Sundays can still offer house calls then if configured to.
+function getHouseCallHoursForDay(dayOfWeek) {
+  let hours;
+  try { hours = JSON.parse(getSetting('house_call_hours') || '[]'); } catch (_) { hours = []; }
+  const h = hours.find(r => r.day_of_week === dayOfWeek);
+  return h?.is_open ? h : null;
+}
+
+function getHouseCallWeeklyHours() {
+  let hours;
+  try { hours = JSON.parse(getSetting('house_call_hours') || '[]'); } catch (_) { hours = []; }
+  return Array.from({ length: 7 }, (_, dow) =>
+    hours.find(r => r.day_of_week === dow) || { day_of_week: dow, is_open: 0, open_time: '09:00', close_time: '18:00' }
+  );
+}
+
+function setHouseCallWeeklyHours(hoursArray) {
+  const rows = hoursArray.map(h => ({
+    day_of_week: h.day_of_week,
+    is_open:     h.is_open ? 1 : 0,
+    open_time:   h.open_time,
+    close_time:  h.close_time,
+  }));
+  setSetting('house_call_hours', JSON.stringify(rows));
+}
+
 // ── Services ──────────────────────────────────────────────────────────────────
 
 const getActiveServices = () => db.services.find(s => s.is_active).sort((a,b) => a.sort_order - b.sort_order);
@@ -203,11 +236,15 @@ const getAllServices     = () => db.services.find().sort((a,b) => a.sort_order -
 const getService        = id => db.services.findOne(s => String(s.id) === String(id));
 
 function upsertService(s) {
+  // A stray leading/trailing space in the name breaks WhatsApp's *bold*
+  // formatting (it requires no whitespace right inside the asterisks), so
+  // trim it here rather than relying on the dashboard input to catch it.
+  const name = (s.name || '').trim();
   const existing = db.services.findOne(r => String(r.id) === String(s.id));
   if (existing) {
-    db.services.updateById(s.id, { name: s.name, emoji: s.emoji||'', description: s.description||'', duration: +s.duration, price: +s.price, is_active: s.is_active??1, sort_order: s.sort_order??0 });
+    db.services.updateById(s.id, { name, emoji: s.emoji||'', description: s.description||'', duration: +s.duration, price: +s.price, is_active: s.is_active??1, sort_order: s.sort_order??0 });
   } else {
-    db.services.insert({ ...s, duration: +s.duration, price: +s.price, is_active: s.is_active??1, sort_order: s.sort_order??0 });
+    db.services.insert({ ...s, name, duration: +s.duration, price: +s.price, is_active: s.is_active??1, sort_order: s.sort_order??0 });
   }
 }
 
@@ -349,6 +386,12 @@ function createAppointment(data) {
     status:           data.status || 'confirmed',
     notes:            data.notes || '',
     reminder_sent:    0,
+    is_house_call:          data.is_house_call ? 1 : 0,
+    house_call_lat:         data.house_call_lat ?? null,
+    house_call_lng:         data.house_call_lng ?? null,
+    house_call_address:     data.house_call_address || '',
+    house_call_distance_km: data.house_call_distance_km ?? null,
+    house_call_fee:         data.house_call_fee ?? 0,
   });
   // Return the code alongside the insert result so callers can show it
   return { ...result, booking_code };
@@ -648,9 +691,9 @@ function _generateSlots(baseDate, openTime, closeTime, serviceDuration, interval
   return slots;
 }
 
-async function getAvailableSlotsForEmployee(employee, date, serviceDuration, { excludeId } = {}) {
+async function getAvailableSlotsForEmployee(employee, date, serviceDuration, { excludeId, isHouseCall } = {}) {
   const dayOfWeek = date.getDay();
-  const hours     = getHoursForDay(employee.id, dayOfWeek);
+  const hours     = isHouseCall ? getHouseCallHoursForDay(dayOfWeek) : getHoursForDay(employee.id, dayOfWeek);
   if (!hours) return [];
 
   // Employee on approved leave → no slots
@@ -707,10 +750,10 @@ async function getAvailableSlotsForEmployee(employee, date, serviceDuration, { e
   );
 }
 
-async function getAvailableSlotsForAny(employees, date, serviceDuration) {
+async function getAvailableSlotsForAny(employees, date, serviceDuration, { isHouseCall } = {}) {
   const map = new Map();
   for (const emp of employees) {
-    for (const slot of await getAvailableSlotsForEmployee(emp, date, serviceDuration)) {
+    for (const slot of await getAvailableSlotsForEmployee(emp, date, serviceDuration, { isHouseCall })) {
       if (map.has(slot.time)) {
         map.get(slot.time).availableEmployees.push(emp.id);
       } else {
@@ -1069,6 +1112,54 @@ async function getAvailableSlotsForBatchGroup(persons, employees, date) {
   return results;
 }
 
+// ── House calls (home visits) ────────────────────────────────────────────────
+
+/** Shop's own coordinates, or null if not yet configured in Settings. */
+function getShopCoordinates() {
+  const lat = parseFloat(getSetting('shop_latitude'));
+  const lng = parseFloat(getSetting('shop_longitude'));
+  return (Number.isFinite(lat) && Number.isFinite(lng)) ? { lat, lng } : null;
+}
+
+/**
+ * Given a straight-line distance in km, returns the house-call fee and extra
+ * appointment minutes (travel time) per the admin's configured settings.
+ * `withinRange` is false beyond house_call_max_km — the caller should refuse
+ * the booking in that case rather than use fee/extraMinutes.
+ */
+function calculateHouseCallPricing(distanceKm) {
+  const maxKm = parseFloat(getSetting('house_call_max_km')) || 15;
+  if (distanceKm > maxKm) return { withinRange: false, fee: 0, extraMinutes: 0 };
+
+  const mode = getSetting('house_call_pricing_mode') || 'formula';
+  let fee = 0;
+
+  if (mode === 'tiers') {
+    let tiers = [];
+    try { tiers = JSON.parse(getSetting('house_call_tiers') || '[]'); } catch (_) { tiers = []; }
+    tiers = tiers.slice().sort((a, b) => a.upTo - b.upTo);
+    const tier = tiers.find(t => distanceKm <= t.upTo);
+    fee = tier ? (+tier.fee || 0) : (+tiers[tiers.length - 1]?.fee || 0);
+  } else {
+    // The base fee covers the included distance outright (e.g. "first 3 km =
+    // SRD 800") — it is not a free radius, so it always applies once a house
+    // call happens, with per-km charged only for distance beyond it.
+    const includedKm = parseFloat(getSetting('house_call_free_km'))     || 0;
+    const baseFee    = parseFloat(getSetting('house_call_base_fee'))    || 0;
+    const perKmFee    = parseFloat(getSetting('house_call_per_km_fee')) || 0;
+    fee = baseFee + Math.max(0, distanceKm - includedKm) * perKmFee;
+  }
+
+  // The barber has to drive back to the shop (or their next appointment)
+  // afterwards too — the calendar block has to cover both legs, not just the
+  // trip out, or the next slot would start while they're still on the road.
+  const bufferMin = parseFloat(getSetting('house_call_travel_buffer_minutes'))  || 0;
+  const perKmMin  = parseFloat(getSetting('house_call_travel_minutes_per_km'))  || 0;
+  const extraMinutes = Math.round(bufferMin + (distanceKm * 2) * perKmMin);
+
+  return { withinRange: true, fee: Math.round(fee), extraMinutes };
+}
+
 function pickLeastBusyEmployee(employeeIds, dateStr) {
   const counts = employeeIds.map(id => ({
     id,
@@ -1082,7 +1173,7 @@ function pickLeastBusyEmployee(employeeIds, dateStr) {
   return counts[0].id;
 }
 
-function getAvailableDates(employees, lang = 'en', daysAhead, limit = 20) {
+function getAvailableDates(employees, lang = 'en', daysAhead, limit = 20, isHouseCall = false) {
   const ahead = daysAhead || parseInt(getSetting('booking_days_ahead')) || 20;
   const dates = [];
   const today = new Date();
@@ -1096,6 +1187,19 @@ function getAvailableDates(employees, lang = 'en', daysAhead, limit = 20) {
     // Skip dates blocked for the whole shop
     if (db.blockedDates.findOne(b => b.date === dateStr && b.employee_id === null && b.all_day))
       continue;
+
+    // House calls run on their own weekly schedule (Settings → House Calls),
+    // independent of any barber's in-shop hours — a barber's own hours don't
+    // gate the day here, only their leave/blocked status does.
+    if (isHouseCall) {
+      if (!getHouseCallHoursForDay(dow)) continue;
+      const anyOpen = employees.length === 0 || employees.some(e =>
+        !db.blockedDates.findOne(b => b.date === dateStr && String(b.employee_id) === String(e.id) && b.all_day) &&
+        !isEmployeeOnLeave(e.id, dateStr)
+      );
+      if (anyOpen) dates.push({ date: d, dayOfWeek: dow, fullDisplay: localeLongDate(d, lang) });
+      continue;
+    }
 
     // Global shop closed for this day-of-week → always skip, regardless of employee hours
     const globalHours = getHoursForDay(null, dow);
@@ -1285,8 +1389,10 @@ function _toAmPm(h, m)  {
 module.exports = {
   getSetting, setSetting, getAllSettings, setManySettings,
   getEmployees, getActiveEmployees, getEmployee, getEmployeesForService, createEmployee, updateEmployee, toggleEmployee, deleteEmployee, getBarberForPhone,
+  getHouseCallEmployees, getShopCoordinates, calculateHouseCallPricing,
   isEmployeeAwayToday, toggleEmployeeAwayToday,
   getHoursForDay, getWeeklyHours, setWeeklyHours,
+  getHouseCallHoursForDay, getHouseCallWeeklyHours, setHouseCallWeeklyHours,
   getActiveServices, getAllServices, getService, upsertService, toggleService, deleteService,
   getBotMessages, getBotMessage, setBotMessage, setManyMessages,
   getAppointments, getTodayAppointments, getDashboardStats,

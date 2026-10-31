@@ -39,6 +39,12 @@ const TRANSLATIONS = {
     more_services:     'Type *more* to see more services',
     no_barbers_service:'😔 Sorry, no barbers are currently available for *{service}*. Please contact us directly.',
     invalid_choice:    'Please reply with *1 – {max}*.',
+    house_call_share_location: '🏠 *House Call*\n\nPlease share your location so we can calculate the visit fee and travel time.\n\n📎 Tap the attachment icon → Location → Send your current location.',
+    house_call_unavailable:    '😔 Sorry, no barbers currently offer house calls. Please book an in-shop appointment instead.',
+    house_call_out_of_range:   '😔 Sorry, that\'s outside our house-call area (max {max} km). Would you like to book an in-shop appointment instead?',
+    house_call_summary:        '🏠 *House Call*\n📍 Distance: {km} km\n💰 Extra fee: {currency} {fee}\n⏱️ Extra time: {minutes} min\n\n_This is added to your service price and appointment length._',
+    booked_house_call_note:    '🏠 _We\'ll come to you — see the location and fee details above._',
+    house_call_service_name:   'House Call',
 
     // Employee selection
     choose_barber:     '💈 *Choose your barber:*',
@@ -178,6 +184,7 @@ const TRANSLATIONS = {
     // Feedback / complaints & suggestions
     menu_feedback:             '💬 Complaints & Suggestions',
     menu_privacy:              '🔒 Privacy & Policy',
+    menu_house_call:           '🏠 House Call',
     feedback_header:           '💬 *Complaints & Suggestions*\n\nWhat would you like to do?',
     feedback_option_complaint: '1️⃣ File a Complaint',
     feedback_option_suggestion:'2️⃣ Share a Suggestion',
@@ -219,6 +226,12 @@ const TRANSLATIONS = {
     more_services:     'Typ *more* om meer diensten te zien',
     no_barbers_service:'😔 Sorry, geen kapper beschikbaar voor *{service}*. Neem rechtstreeks contact op.',
     invalid_choice:    'Antwoord met *1 – {max}*.',
+    house_call_share_location: '🏠 *Huisbezoek*\n\nDeel uw locatie zodat we de reiskosten en extra tijd kunnen berekenen.\n\n📎 Tik op de bijlage-icoon → Locatie → Verstuur uw huidige locatie.',
+    house_call_unavailable:    '😔 Helaas biedt momenteel geen enkele kapper huisbezoeken aan. Boek in plaats daarvan een afspraak in de zaak.',
+    house_call_out_of_range:   '😔 Helaas valt dat buiten ons huisbezoekgebied (max {max} km). Wilt u in plaats daarvan een afspraak in de zaak boeken?',
+    house_call_summary:        '🏠 *Huisbezoek*\n📍 Afstand: {km} km\n💰 Extra kosten: {currency} {fee}\n⏱️ Extra tijd: {minutes} min\n\n_Dit wordt toegevoegd aan de prijs en duur van uw afspraak._',
+    booked_house_call_note:    '🏠 _We komen naar u toe — zie de locatie- en kostendetails hierboven._',
+    house_call_service_name:   'Huisbezoek',
 
     choose_barber:     '💈 *Kies uw kapper:*',
     any_barber:        '🎲 Elke Beschikbare Kapper',
@@ -349,6 +362,7 @@ const TRANSLATIONS = {
     // Feedback / klachten & suggesties
     menu_feedback:             '💬 Klachten & Suggesties',
     menu_privacy:              '🔒 Privacy & Beleid',
+    menu_house_call:           '🏠 Huisbezoek',
     feedback_header:           '💬 *Klachten & Suggesties*\n\nWat wilt u doen?',
     feedback_option_complaint: '1️⃣ Klacht Indienen',
     feedback_option_suggestion:'2️⃣ Suggestie Delen',
@@ -390,6 +404,12 @@ const TRANSLATIONS = {
     more_services:     'Escribe *more* para ver más servicios',
     no_barbers_service:'😔 Lo sentimos, no hay barberos disponibles para *{service}*. Contáctenos directamente.',
     invalid_choice:    'Por favor responde con *1 – {max}*.',
+    house_call_share_location: '🏠 *Visita a Domicilio*\n\nComparta su ubicación para calcular la tarifa y el tiempo de viaje.\n\n📎 Toque el icono de adjuntar → Ubicación → Enviar su ubicación actual.',
+    house_call_unavailable:    '😔 Lo sentimos, actualmente ningún barbero ofrece visitas a domicilio. Por favor reserve una cita en el local.',
+    house_call_out_of_range:   '😔 Lo sentimos, eso está fuera de nuestra zona de visitas a domicilio (máx {max} km). ¿Desea reservar una cita en el local en su lugar?',
+    house_call_summary:        '🏠 *Visita a Domicilio*\n📍 Distancia: {km} km\n💰 Tarifa extra: {currency} {fee}\n⏱️ Tiempo extra: {minutes} min\n\n_Esto se suma al precio y duración de su servicio._',
+    booked_house_call_note:    '🏠 _Iremos a usted — vea los detalles de ubicación y tarifa arriba._',
+    house_call_service_name:   'Visita a Domicilio',
 
     choose_barber:     '💈 *Elige tu barbero:*',
     any_barber:        '🎲 Cualquier Barbero Disponible',
@@ -520,6 +540,7 @@ const TRANSLATIONS = {
     // Feedback
     menu_feedback:             '💬 Quejas & Sugerencias',
     menu_privacy:              '🔒 Privacidad & Política',
+    menu_house_call:           '🏠 Visita a Domicilio',
     feedback_header:           '💬 *Quejas & Sugerencias*\n\n¿Qué deseas hacer?',
     feedback_option_complaint: '1️⃣ Presentar una Queja',
     feedback_option_suggestion:'2️⃣ Compartir una Sugerencia',
@@ -561,6 +582,12 @@ const TRANSLATIONS = {
     more_services:     'Tapez *more* pour voir plus de services',
     no_barbers_service:'😔 Désolé, aucun barbier n\'est disponible pour *{service}*. Veuillez nous contacter directement.',
     invalid_choice:    'Veuillez répondre avec *1 – {max}*.',
+    house_call_share_location: '🏠 *Visite à Domicile*\n\nPartagez votre position pour que nous puissions calculer les frais et le temps de trajet.\n\n📎 Appuyez sur l\'icône trombone → Position → Envoyer votre position actuelle.',
+    house_call_unavailable:    '😔 Désolé, aucun barbier ne propose actuellement de visites à domicile. Veuillez réserver un rendez-vous en boutique.',
+    house_call_out_of_range:   '😔 Désolé, c\'est en dehors de notre zone de visite à domicile (max {max} km). Souhaitez-vous réserver un rendez-vous en boutique à la place ?',
+    house_call_summary:        '🏠 *Visite à Domicile*\n📍 Distance : {km} km\n💰 Frais supplémentaires : {currency} {fee}\n⏱️ Temps supplémentaire : {minutes} min\n\n_Ceci s\'ajoute au prix et à la durée de votre service._',
+    booked_house_call_note:    '🏠 _Nous viendrons à vous — voir les détails de localisation et de frais ci-dessus._',
+    house_call_service_name:   'Visite à Domicile',
 
     choose_barber:     '💈 *Choisissez votre barbier :*',
     any_barber:        '🎲 N\'importe quel Barbier Disponible',
@@ -691,6 +718,7 @@ const TRANSLATIONS = {
     // Feedback
     menu_feedback:             '💬 Plaintes & Suggestions',
     menu_privacy:              '🔒 Confidentialité & Règlement',
+    menu_house_call:           '🏠 Visite à Domicile',
     feedback_header:           '💬 *Plaintes & Suggestions*\n\nQue souhaitez-vous faire ?',
     feedback_option_complaint: '1️⃣ Déposer une Plainte',
     feedback_option_suggestion:'2️⃣ Partager une Suggestion',
@@ -732,6 +760,12 @@ const TRANSLATIONS = {
     more_services:     'Digite *more* para ver mais serviços',
     no_barbers_service:'😔 Desculpe, nenhum barbeiro disponível para *{service}*. Por favor contate-nos diretamente.',
     invalid_choice:    'Por favor responda com *1 – {max}*.',
+    house_call_share_location: '🏠 *Visita Domiciliar*\n\nPor favor compartilhe sua localização para calcularmos a taxa e o tempo de deslocamento.\n\n📎 Toque no ícone de anexo → Localização → Enviar sua localização atual.',
+    house_call_unavailable:    '😔 Desculpe, nenhum barbeiro oferece visitas domiciliares no momento. Por favor agende um atendimento na loja.',
+    house_call_out_of_range:   '😔 Desculpe, isso está fora da nossa área de visitas domiciliares (máx {max} km). Deseja agendar um atendimento na loja?',
+    house_call_summary:        '🏠 *Visita Domiciliar*\n📍 Distância: {km} km\n💰 Taxa extra: {currency} {fee}\n⏱️ Tempo extra: {minutes} min\n\n_Isso é adicionado ao preço e duração do seu serviço._',
+    booked_house_call_note:    '🏠 _Iremos até você — veja os detalhes de localização e taxa acima._',
+    house_call_service_name:   'Visita Domiciliar',
 
     choose_barber:     '💈 *Escolha seu barbeiro:*',
     any_barber:        '🎲 Qualquer Barbeiro Disponível',
@@ -852,6 +886,7 @@ const TRANSLATIONS = {
     // Feedback
     menu_feedback:             '💬 Reclamações & Sugestões',
     menu_privacy:              '🔒 Privacidade & Política',
+    menu_house_call:           '🏠 Visita Domiciliar',
     feedback_header:           '💬 *Reclamações & Sugestões*\n\nO que gostaria de fazer?',
     feedback_option_complaint: '1️⃣ Fazer uma Reclamação',
     feedback_option_suggestion:'2️⃣ Compartilhar uma Sugestão',

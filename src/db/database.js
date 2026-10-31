@@ -86,6 +86,32 @@ function seedIfEmpty() {
     bot_paused:           '0',
     allow_any_employee:   '1',
     max_group_size:       '3',   // hard cap on people per group booking, regardless of barber count
+
+    // House calls (home visits)
+    house_call_enabled:              '0',   // master toggle — hides the menu item entirely when off
+    shop_latitude:                   '',    // shop's own coordinates, used to compute distance to the customer
+    shop_longitude:                  '',
+    house_call_max_km:               '15',  // beyond this, house calls aren't offered
+    // House calls' own weekly schedule — independent of any barber's in-shop
+    // hours (e.g. a shop closed Sundays can still offer house calls then).
+    // Defaults to mirror the standard shop hours as a sane starting point.
+    house_call_hours: JSON.stringify([
+      { day_of_week: 0, is_open: 0, open_time: '09:00', close_time: '18:00' },
+      { day_of_week: 1, is_open: 1, open_time: '09:00', close_time: '18:00' },
+      { day_of_week: 2, is_open: 1, open_time: '09:00', close_time: '18:00' },
+      { day_of_week: 3, is_open: 1, open_time: '09:00', close_time: '18:00' },
+      { day_of_week: 4, is_open: 1, open_time: '09:00', close_time: '18:00' },
+      { day_of_week: 5, is_open: 1, open_time: '09:00', close_time: '18:00' },
+      { day_of_week: 6, is_open: 1, open_time: '09:00', close_time: '16:00' },
+    ]),
+    house_call_pricing_mode:         'formula', // 'formula' | 'tiers'
+    house_call_free_km:              '3',   // formula mode: distance included in the base fee (not "free" — the base fee still applies)
+    house_call_base_fee:             '800', // formula mode: flat base fee, covers the included distance
+    house_call_per_km_fee:           '75',  // formula mode: extra SRD per km beyond the included distance
+    house_call_tiers:                '[{"upTo":5,"fee":0},{"upTo":10,"fee":50},{"upTo":15,"fee":100}]', // tiers mode: [{upTo:km, fee}], sorted ascending
+    house_call_visit_minutes:        '45',  // fixed on-site cutting time — house calls are their own booking, not a pick from the regular service list
+    house_call_travel_buffer_minutes:'15',  // flat setup/pack time, always added to the appointment
+    house_call_travel_minutes_per_km:'3',   // one-way minutes per km — doubled automatically to cover the drive back to the shop too
     shop_name:            process.env.SHOP_NAME        || "Jayden's Barbershop",
     shop_address:         process.env.SHOP_ADDRESS     || 'Paramaribo, Suriname',
     shop_phone:           process.env.SHOP_PHONE       || '',
@@ -117,8 +143,9 @@ function seedIfEmpty() {
       { action: 'language', enabled: true  },
       { action: 'manage',   enabled: true  },
       { action: 'training', enabled: false },
-      { action: 'feedback', enabled: true  },
-      { action: 'privacy',  enabled: true  },
+      { action: 'feedback',   enabled: true  },
+      { action: 'privacy',    enabled: true  },
+      { action: 'house_call', enabled: false },
     ]),
     training_video_filename:  '',     // filename of uploaded training video in data/uploads/
     barber_scan_pin:          '1234', // PIN for the barber-only QR scanner page
@@ -143,6 +170,19 @@ function seedIfEmpty() {
   Object.entries(settingDefaults).forEach(([k, v]) => {
     if (!db.settings.has(k)) db.settings.set(k, v);
   });
+
+  // Add the house_call menu item to an existing menu_order (shops that were
+  // already running before house calls existed have a menu_order setting
+  // seeded without it — the fresh-seed default above already includes it,
+  // this only backfills upgrades). Left disabled; the master
+  // house_call_enabled switch (and the menu editor) control visibility.
+  try {
+    const menuOrder = JSON.parse(db.settings.get('menu_order') || '[]');
+    if (Array.isArray(menuOrder) && !menuOrder.some(m => m.action === 'house_call')) {
+      menuOrder.push({ action: 'house_call', enabled: false });
+      db.settings.set('menu_order', JSON.stringify(menuOrder));
+    }
+  } catch (_) { /* malformed menu_order — leave it alone, not this migration's job to fix */ }
 
   // Default keywords
   if (db.keywords.count() === 0) {
@@ -200,6 +240,8 @@ db.employees.find().forEach(e => {
   if (!Array.isArray(e.fallback_employee_ids)) {
     patch.fallback_employee_ids = e.fallback_employee_id ? [e.fallback_employee_id] : [];
   }
+  // House calls: opt-in per barber, nobody does them until explicitly toggled on
+  if (e.does_house_calls == null) patch.does_house_calls = 0;
   if (Object.keys(patch).length) db.employees.updateById(e.id, patch);
 });
 
