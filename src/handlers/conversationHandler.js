@@ -35,6 +35,9 @@ const NUM       = ['1️⃣','2️⃣','3️⃣','4️⃣','5️⃣','6️⃣','
 const num       = i => NUM[i] || `*${i + 1}.*`;
 const PAGE_SIZE = 10; // max time slots shown per page
 const CUR = () => q.getSetting('currency') || 'SRD';
+// House calls are priced in their own currency (USD by default).
+const HC_CUR = () => q.getSetting('house_call_currency') || 'USD';
+const curFor = (service) => (service && service.id === 'house_call' ? HC_CUR() : CUR());
 
 // A group booking can only use as many barbers at once as are actually
 // active, and never more than the shop-wide cap (Settings → Booking) — e.g.
@@ -591,7 +594,7 @@ async function onHouseCallLocation(userId, location, session) {
     km: (Math.round(distanceKm * 10) / 10).toString(),
     fee: pricing.fee.toString(),
     minutes: pricing.extraMinutes.toString(),
-    currency: CUR(),
+    currency: HC_CUR(),
   });
   return `${summary}\n\n${buildDateMenu(lang, dates, updated.selectedService, 0)}`;
 }
@@ -1078,7 +1081,9 @@ async function finalizeBooking(userId, session) {
   const footer       = `${t(lang, 'booked_footer_default')}\n\n_${cancelLine}_`;
   // Only mention the calendar invite when the .ics attachment will actually be sent.
   const calendarNote = q.getSetting('ics_enabled') !== '0' ? t(lang, 'calendar_invite_note') : null;
-  const totalPrice   = (+selectedService.price * totalCount).toFixed(0);
+  // House calls: the service price is 0 and the distance fee is the whole price.
+  const houseCallFee = session.isHouseCall ? (+session.houseCallFee || 0) : 0;
+  const totalPrice   = (+selectedService.price * totalCount + houseCallFee).toFixed(0);
 
   const lines = [
     totalCount > 1
@@ -1200,7 +1205,7 @@ async function finalizeBooking(userId, session) {
     `📅 ${selectedDate.fullDisplay}  ⏰ ${selectedTime.display}`,
     totalCount > 1 ? `👥 Group of ${totalCount}` : null,
     `🎫 Code(s): ${allCodes}`,
-    `💰 ${CUR()} ${totalPrice}`,
+    `💰 ${curFor(selectedService)} ${totalPrice}`,
   ].filter(Boolean).join('\n');
   notifyCS(csLines).catch(() => {});
 
@@ -1903,7 +1908,7 @@ const MENU_ITEM_LABEL = {
 
 const MENU_ITEM_EMOJI = {
   booking:  '📅',
-  hours:    '🕐',
+  hours:    '⏰',
   location: '📍',
   prices:   '💰',
   contact:  '📞',
@@ -1966,9 +1971,11 @@ function buildMainMenu(lang, customHeader = null) {
   const header = customHeader || defaultWelcome.replace('{shop_name}', shop);
   const activeItems = getMenuItems().filter(m => m.enabled);
   const lines = activeItems.map((m, i) => {
-    const customText = m.labels?.[lang] || m.labels?.['en'];
+    const customText = (m.labels?.[lang] || m.labels?.['en'] || '').trim();
+    const emoji = MENU_ITEM_EMOJI[m.action] || '';
+    // Always show the item's emoji; skip it if the admin already typed it.
     const label = customText
-      ? `${MENU_ITEM_EMOJI[m.action] || ''} ${customText}`.trim()
+      ? (emoji && !customText.startsWith(emoji) ? `${emoji} ${customText}` : customText)
       : (MENU_ITEM_LABEL[m.action] || (() => m.action))(lang);
     return `${num(i)} ${label}`;
   });
@@ -2154,7 +2161,7 @@ function buildConfirmationSummary(lang, name, service, date, time, groupSize = 1
     lines.push(`${service.emoji} ${t(lang, 'confirm_service')}  : *${service.name}*`);
     lines.push(`${t(lang, 'confirm_date')}    : *${date.fullDisplay}*`);
     lines.push(`${t(lang, 'confirm_time')}    : *${time.display}*`);
-    lines.push(`${t(lang, 'confirm_price')}   : *${CUR()} ${singlePrice}*`);
+    lines.push(`${t(lang, 'confirm_price')}   : *${curFor(service)} ${singlePrice}*`);
   }
 
   return lines.join('\n');

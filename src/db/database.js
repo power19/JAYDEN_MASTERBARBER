@@ -89,6 +89,7 @@ function seedIfEmpty() {
 
     // House calls (home visits)
     house_call_enabled:              '0',   // master toggle — hides the menu item entirely when off
+    house_call_currency:             'USD', // house-call fees are charged in this currency, not the shop currency
     shop_latitude:                   '',    // shop's own coordinates, used to compute distance to the customer
     shop_longitude:                  '',
     house_call_max_km:               '15',  // beyond this, house calls aren't offered

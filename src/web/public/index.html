@@ -146,6 +146,8 @@
         <div class="card text-center">
           <div class="text-3xl font-bold text-emerald-500" x-text="settings.currency + ' ' + (stats.revenue?.toFixed(2) ?? '0')"></div>
           <div class="text-slate-500 text-sm mt-1">Today's Revenue</div>
+          <div x-show="stats.revenue_house_call > 0" class="text-xs text-blue-500 font-semibold mt-1"
+               x-text="'+ ' + (settings.house_call_currency || 'USD') + ' ' + (stats.revenue_house_call?.toFixed(2) ?? '0') + ' house calls'"></div>
         </div>
         <div class="card text-center">
           <div class="text-3xl font-bold text-purple-500" x-text="stats.upcoming ?? '—'"></div>
@@ -389,7 +391,7 @@
                       <span x-text="a.employee_name || '—'"></span>
                     </div>
                   </td>
-                  <td class="py-3" x-text="`${settings.currency} ${a.service_price}`"></td>
+                  <td class="py-3" x-text="`${a.is_house_call ? (settings.house_call_currency || 'USD') : settings.currency} ${a.service_price}`"></td>
                   <td class="py-3 text-sm">
                     <span x-show="a.rating" x-text="'⭐'.repeat(a.rating) + ' (' + a.rating + '/5)'"></span>
                     <span x-show="!a.rating" class="text-slate-300 text-xs">—</span>
@@ -1840,6 +1842,12 @@
               </div>
             </div>
 
+            <div>
+              <label class="label">House Call Currency</label>
+              <input type="text" x-model="settings.house_call_currency" class="input w-28" placeholder="USD">
+              <p class="text-xs text-slate-400 mt-1">All house-call fees below are in this currency. Regular services stay in the shop currency.</p>
+            </div>
+
             <!-- Formula mode fields -->
             <div x-show="settings.house_call_pricing_mode === 'formula'" class="grid grid-cols-3 gap-3">
               <div>
@@ -1847,12 +1855,12 @@
                 <input type="number" x-model="settings.house_call_free_km" class="input" min="0">
               </div>
               <div>
-                <label class="label">Base fee</label>
+                <label class="label">Base fee (<span x-text="settings.house_call_currency || 'USD'"></span>)</label>
                 <input type="number" x-model="settings.house_call_base_fee" class="input" min="0">
                 <p class="text-xs text-slate-400 mt-1">Charged for any house call, covering the included distance above.</p>
               </div>
               <div>
-                <label class="label">Per extra km</label>
+                <label class="label">Per extra km (<span x-text="settings.house_call_currency || 'USD'"></span>)</label>
                 <input type="number" x-model="settings.house_call_per_km_fee" class="input" min="0">
               </div>
             </div>
@@ -1872,7 +1880,7 @@
                     <span class="text-xs text-slate-500">km →</span>
                     <input type="number" min="0" class="input w-24" :value="tier.fee"
                       @input="const t=[...tiers]; t[idx]={...t[idx], fee: +$event.target.value}; tiers = t">
-                    <span class="text-xs text-slate-500">fee</span>
+                    <span class="text-xs text-slate-500" x-text="(settings.house_call_currency || 'USD') + ' fee'"></span>
                     <button @click="tiers = tiers.filter((_, i) => i !== idx)" class="text-red-400 hover:text-red-600 text-xs font-semibold ml-auto">✕</button>
                   </div>
                 </template>
@@ -2586,8 +2594,8 @@ function app() {
       { code: 'es', name: 'Spanish', flag: '🇪🇸' },
       { code: 'fr', name: 'French',  flag: '🇫🇷' },
     ],
-    menuIcons:  { booking:'📅', hours:'🕐', location:'📍', prices:'💰', contact:'📞', gallery:'📸', language:'🌐', manage:'📋', training:'🎓', feedback:'💬', privacy:'🔒' },
-    menuLabels: { booking:'Book an Appointment', hours:'Opening Hours', location:'Location', prices:'Service Prices', contact:'Contact Us', gallery:'Styles & Gallery', language:'Change Language', manage:'Manage My Booking', training:'Barber Training', feedback:'Complaints & Suggestions', privacy:'Privacy & Policy' },
+    menuIcons:  { booking:'📅', hours:'⏰', location:'📍', prices:'💰', contact:'📞', gallery:'📸', language:'🌐', manage:'📋', training:'🎓', feedback:'💬', privacy:'🔒', house_call:'🏠' },
+    menuLabels: { booking:'Book an Appointment', hours:'Opening Hours', location:'Location', prices:'Service Prices', contact:'Contact Us', gallery:'Styles & Gallery', language:'Change Language', manage:'Manage My Booking', training:'Barber Training', feedback:'Complaints & Suggestions', privacy:'Privacy & Policy', house_call:'House Call' },
 
     // Keywords
     keywords: [],

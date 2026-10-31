@@ -299,7 +299,9 @@ function getDashboardStats() {
   return {
     today:     todayAppts.filter(a => a.status !== 'cancelled').length,
     week:      all.filter(a => (a.start_time||'') >= weekAgo && a.status !== 'cancelled').length,
-    revenue:   todayAppts.filter(a => a.status === 'confirmed').reduce((s,a) => s + (+a.service_price||0), 0),
+    // House calls are charged in a different currency, so keep them out of the shop-currency total.
+    revenue:   todayAppts.filter(a => a.status === 'confirmed' && !a.is_house_call).reduce((s,a) => s + (+a.service_price||0), 0),
+    revenue_house_call: todayAppts.filter(a => a.status === 'confirmed' && a.is_house_call).reduce((s,a) => s + (+a.service_price||0), 0),
     employees: db.employees.count(e => e.is_active),
     upcoming:  all.filter(a => (a.start_time||'') > now && a.status === 'confirmed').length,
   };
