@@ -722,7 +722,10 @@ router.get('/settings', (req, res) => {
 
 router.put('/settings', (req, res) => {
   try {
-    q.setManySettings(req.body);
+    // The Settings page sends back every setting it loaded, including a possibly
+    // stale menu_order. The menu is owned by PUT /api/menu, so never touch it here.
+    const { menu_order, ...rest } = req.body || {};
+    q.setManySettings(rest);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
